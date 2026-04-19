@@ -4,3 +4,7 @@ altair
 psycopg2-binary
 openai
 python-dotenv
+Flask
+twilio
+gunicorn
+APScheduler
