@@ -163,7 +163,7 @@ def sms_reply():
                 f"🚨 [SYSTEM EMERGENCY ALERT]\n"
                 f"Your family member ({sender_number}) has just reported severe Parkinson's symptoms (High Severity or Severe Motor Fluctuation).\n"
                 f"Please check on the patient's safety immediately!\n"
-                f"🔗 View detailed clinical data: https://parkinson-tracker-3idgng8wxnc9gggpcymc3e.streamlit.app/"
+                f"🔗 View detailed clinical data: https://parkinson-tracker-v1.streamlit.app/"
             )
             try:
                 # Dispatch the alert via Twilio concurrently (without interrupting the patient's reply)
