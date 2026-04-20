@@ -35,7 +35,6 @@ def proactive_clinical_checkin():
     """
     Proactive Ecological Momentary Assessment (EMA):
     Queries the cloud database for active patients and sends a scheduled clinical check-in message.
-    This acts as a digital health intervention to improve patient data adherence.
     """
     print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] ⏰ Running Proactive Check-in...")
     
@@ -78,20 +77,16 @@ def proactive_clinical_checkin():
     except Exception as e:
         print(f"❌ Proactive Check-in Error: {e}")
 
-
 # --- Background Task Scheduler Setup ---
 scheduler = BackgroundScheduler()
 
-# 💡 TEST MODE: Trigger the proactive check-in exactly 10 seconds after server startup
+# TEST MODE: Trigger the proactive check-in exactly 10 seconds after server startup
 run_time = datetime.datetime.now() + datetime.timedelta(seconds=10)
 scheduler.add_job(proactive_clinical_checkin, 'date', run_date=run_time)
 
 # PRODUCTION MODE: Continue to run the check-in every 60 minutes thereafter
 scheduler.add_job(proactive_clinical_checkin, 'interval', minutes=60)
-
-# Start the background scheduler
 scheduler.start()
-
 
 @app.route("/sms", methods=['POST'])
 def sms_reply():
@@ -110,7 +105,6 @@ def sms_reply():
         media_content_type = request.values.get('MediaContentType0', '')
         media_url = request.values.get('MediaUrl0', '')
 
-        # 1. Handle Voice Messages via Whisper API (Multilingual Support)
         if 'audio' in media_content_type:
             print(f"🎤 Voice message received. Downloading from: {media_url}")
             auth = (TWILIO_SID, TWILIO_AUTH)
@@ -120,7 +114,6 @@ def sms_reply():
                 temp_filename = f"temp_audio_{uuid.uuid4().hex}.ogg"
                 with open(temp_filename, "wb") as f:
                     f.write(response.content)
-                
                 try:
                     print("🎧 Processing audio with OpenAI Whisper...")
                     with open(temp_filename, "rb") as audio_file:
@@ -128,30 +121,77 @@ def sms_reply():
                             model="whisper-1",
                             file=audio_file
                         )
-                    # Overwrite empty text with transcribed voice text (standardised to written text)
                     msg_received = transcript.text
                     print(f"📝 Transcription result: {msg_received}")
                 except Exception as e:
                     print(f"❌ Whisper transcription failed: {e}")
                     msg_received = "System Note: Voice processing failed."
                 finally:
-                    # Privacy preservation: delete local audio file after processing
                     if os.path.exists(temp_filename):
                         os.remove(temp_filename)
             else:
                 msg_received = "System Note: Failed to download voice message."
                 
-        # 2. Handle Image Messages (Vision processing for MoCA Clock Drawing Test)
         elif 'image' in media_content_type:
             image_url = media_url
             print(f"🖼️ [Attachment Detected]: {image_url}")
 
-    # Prevent processing of empty requests
     if not msg_received and not image_url:
         return str(MessagingResponse())
 
     print(f"\n--- New Incoming Message from {sender_number} ---")
     print(f"[Patient Text/Voice]: '{msg_received}'")
 
-    # Core AI Logic: Pass the text (or transcribed voice) and image URL to the GPT-4o model
+    # Core AI Logic
     full_ai_response = get_ai_response(msg_received, conversation_history[sender_number], sender_number, image_url)
+
+    # ==========================================
+    # 🚨 DIRECTION 3: Event-Driven Caregiver Alert System
+    # ==========================================
+    if "Severity: High" in full_ai_response or "[HAUSER] OFF" in full_ai_response:
+        print(f"🚨 [CRITICAL EVENT] High-risk symptoms detected for ({sender_number})! Triggering caregiver alert...")
+        caregiver_number = os.getenv("CAREGIVER_PHONE_NUMBER")
+        
+        if caregiver_number:
+            alert_msg = (
+                f"🚨 [SYSTEM EMERGENCY ALERT]\n"
+                f"Your family member ({sender_number}) has just reported severe Parkinson's symptoms (High Severity or Severe Motor Fluctuation).\n"
+                f"Please check on the patient's safety immediately!\n"
+                f"🔗 View detailed clinical data: https://parkinson-tracker-v1.streamlit.app/"
+            )
+            try:
+                twilio_client.messages.create(
+                    from_=TWILIO_NUMBER,
+                    body=alert_msg,
+                    to=caregiver_number
+                )
+                print(f"✅ Caregiver alert successfully sent to {caregiver_number}")
+            except Exception as e:
+                print(f"❌ Failed to send caregiver alert: {e}")
+        else:
+            print("⚠️ CAREGIVER_PHONE_NUMBER is not configured in environment variables. Alert cancelled.")
+    # ==========================================
+
+    # --- Session Management & Reply Formatting ---
+    history_msg = msg_received if msg_received else "[Uploaded Image]"
+    conversation_history[sender_number].append({"user": history_msg, "ai": full_ai_response})
+    
+    if len(conversation_history[sender_number]) > 5:
+        conversation_history[sender_number].pop(0)
+    
+    display_response = full_ai_response
+    for tag in ["[SUMMARY]", "[PROFILE]", "[HAUSER]", "[MOCA]"]:
+        if tag in display_response:
+            display_response = display_response.split(tag)[0].strip()
+
+    print(f"[AI] Sending reply to {sender_number}: {display_response}")
+    
+    resp = MessagingResponse()
+    resp.message(display_response)
+    return str(resp)
+
+if __name__ == "__main__":
+    try:
+        app.run(port=5000, debug=True, use_reloader=False)
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
