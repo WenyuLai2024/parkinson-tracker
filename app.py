@@ -11,14 +11,14 @@ from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler 
 from openai import OpenAI
 
-# Import your external AI processing logic
+# Import external AI processing logic (Prompt engineering and GPT-4o calls)
 from app_ai import get_ai_response
 
-# Load environment variables
+# Load environment variables from .env file (for local testing)
 load_dotenv()
 app = Flask(__name__)
 
-# System Configurations
+# --- System Configurations & API Credentials ---
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
@@ -28,18 +28,19 @@ SUPABASE_URL = os.getenv("SUPABASE_DB_URL")
 twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# In-memory conversation history (stores the last 5 messages per patient)
+# In-memory conversation history (stores the last 5 messages per patient to maintain context)
 conversation_history = defaultdict(list)
 
 def proactive_clinical_checkin():
     """
-    Queries the cloud database for active patients and sends a proactive check-in message.
-    Acts as a scheduled digital health intervention.
+    Proactive Ecological Momentary Assessment (EMA):
+    Queries the cloud database for active patients and sends a scheduled clinical check-in message.
+    This acts as a digital health intervention to improve patient data adherence.
     """
     print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] ⏰ Running Proactive Check-in...")
     
     try:
-        # Connect to Cloud PostgreSQL to fetch all active patients
+        # Connect to Cloud PostgreSQL (Supabase) to fetch all active patient IDs
         conn = psycopg2.connect(SUPABASE_URL)
         c = conn.cursor()
         c.execute("SELECT DISTINCT patient_id FROM chat_history")
@@ -50,7 +51,7 @@ def proactive_clinical_checkin():
             print("No patients found in DB to send proactive messages.")
             return
 
-        # Define the standardized check-in prompt
+        # Define the standardized clinical prompt for the patient
         checkin_message = (
             "Hi there! It's your AI clinical assistant. 🩺\n"
             "Just checking in on your mobility this afternoon. "
@@ -58,7 +59,7 @@ def proactive_clinical_checkin():
             "or involuntary movements (Dyskinesia)?"
         )
 
-        # Dispatch messages to all active patients
+        # Dispatch messages to all active patients via Twilio API
         for p in patients:
             patient_phone = p[0]
             msg = twilio_client.messages.create(
@@ -77,10 +78,20 @@ def proactive_clinical_checkin():
     except Exception as e:
         print(f"❌ Proactive Check-in Error: {e}")
 
-# Initialize the background scheduler for proactive messages (Currently set to 60 minutes)
+
+# --- Background Task Scheduler Setup ---
 scheduler = BackgroundScheduler()
+
+# 💡 TEST MODE: Trigger the proactive check-in exactly 10 seconds after server startup
+run_time = datetime.datetime.now() + datetime.timedelta(seconds=10)
+scheduler.add_job(proactive_clinical_checkin, 'date', run_date=run_time)
+
+# PRODUCTION MODE: Continue to run the check-in every 60 minutes thereafter
 scheduler.add_job(proactive_clinical_checkin, 'interval', minutes=60)
+
+# Start the background scheduler
 scheduler.start()
+
 
 @app.route("/sms", methods=['POST'])
 def sms_reply():
@@ -130,7 +141,7 @@ def sms_reply():
             else:
                 msg_received = "System Note: Failed to download voice message."
                 
-        # 2. Handle Image Messages (Vision processing)
+        # 2. Handle Image Messages (Vision processing for MoCA Clock Drawing Test)
         elif 'image' in media_content_type:
             image_url = media_url
             print(f"🖼️ [Attachment Detected]: {image_url}")
@@ -143,68 +154,4 @@ def sms_reply():
     print(f"[Patient Text/Voice]: '{msg_received}'")
 
     # Core AI Logic: Pass the text (or transcribed voice) and image URL to the GPT-4o model
-    full_ai_response = get_ai_response(msg_received, conversation_history[sender_number], sender_number, image_url)
-
-
-    # ==========================================
-    # 🚨 DIRECTION 3: Event-Driven Caregiver Alert System
-    # ==========================================
-    # Trigger a parallel alert if the AI detects high clinical severity or a severe OFF state
-    if "Severity: High" in full_ai_response or "[HAUSER] OFF" in full_ai_response:
-        print(f"🚨 [CRITICAL EVENT] High-risk symptoms detected for ({sender_number})! Triggering caregiver alert...")
-        
-        # Retrieve the designated caregiver's WhatsApp number from environment variables
-        caregiver_number = os.getenv("CAREGIVER_PHONE_NUMBER")
-        
-        if caregiver_number:
-            # Construct the emergency notification payload
-            # Replace the Streamlit link with your actual Dashboard URL
-            alert_msg = (
-                f"🚨 [SYSTEM EMERGENCY ALERT]\n"
-                f"Your family member ({sender_number}) has just reported severe Parkinson's symptoms (High Severity or Severe Motor Fluctuation).\n"
-                f"Please check on the patient's safety immediately!\n"
-                f"🔗 View detailed clinical data: https://parkinson-tracker-v1.streamlit.app/"
-            )
-            try:
-                # Dispatch the alert via Twilio concurrently (without interrupting the patient's reply)
-                twilio_client.messages.create(
-                    from_=TWILIO_NUMBER,
-                    body=alert_msg,
-                    to=caregiver_number
-                )
-                print(f"✅ Caregiver alert successfully sent to {caregiver_number}")
-            except Exception as e:
-                print(f"❌ Failed to send caregiver alert: {e}")
-        else:
-            print("⚠️ CAREGIVER_PHONE_NUMBER is not configured in environment variables. Alert cancelled.")
-    # ==========================================
-
-
-    # --- Session Management & Reply Formatting ---
-    # Update short-term conversation history for context continuity
-    history_msg = msg_received if msg_received else "[Uploaded Image]"
-    conversation_history[sender_number].append({"user": history_msg, "ai": full_ai_response})
-    
-    # Maintain a rolling window of 5 turns to prevent token overflow
-    if len(conversation_history[sender_number]) > 5:
-        conversation_history[sender_number].pop(0)
-    
-    # Information Hiding: Strip internal clinical tags before sending the empathetic response to the patient
-    display_response = full_ai_response
-    for tag in ["[SUMMARY]", "[PROFILE]", "[HAUSER]", "[MOCA]"]:
-        if tag in display_response:
-            display_response = display_response.split(tag)[0].strip()
-
-    print(f"[AI] Sending reply to {sender_number}: {display_response}")
-    
-    # Dispatch the sanitized response back to the patient via WhatsApp
-    resp = MessagingResponse()
-    resp.message(display_response)
-    return str(resp)
-
-if __name__ == "__main__":
-    try:
-        # Run locally (Note: Gunicorn will bypass this block when deployed on Render)
-        app.run(port=5000, debug=True, use_reloader=False)
-    except (KeyboardInterrupt, SystemExit):
-        scheduler.shutdown()
+    full_ai_response = get_ai_response(msg_received, conversation
