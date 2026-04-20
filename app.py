@@ -154,4 +154,4 @@ def sms_reply():
     print(f"[Patient Text/Voice]: '{msg_received}'")
 
     # Core AI Logic: Pass the text (or transcribed voice) and image URL to the GPT-4o model
-    full_ai_response = get_ai_response(msg_received, conversation)
+    full_ai_response = get_ai_response(msg_received, conversation_history[sender_number], sender_number, image_url)
