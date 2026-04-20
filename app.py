@@ -1,4 +1,6 @@
 import os
+import requests
+import uuid
 import psycopg2
 import datetime
 from flask import Flask, request
@@ -7,18 +9,25 @@ from twilio.rest import Client
 from collections import defaultdict
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler 
+from openai import OpenAI
 
+# Import your external AI processing logic
 from app_ai import get_ai_response
 
+# Load environment variables
 load_dotenv()
 app = Flask(__name__)
 
+# System Configurations
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 SUPABASE_URL = os.getenv("SUPABASE_DB_URL")
-twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
 
+twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# In-memory conversation history
 conversation_history = defaultdict(list)
 
 def proactive_clinical_checkin():
@@ -28,7 +37,6 @@ def proactive_clinical_checkin():
     print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] ⏰ Running Proactive Check-in...")
     
     try:
-        # Connecting to Cloud PostgreSQL
         conn = psycopg2.connect(SUPABASE_URL)
         c = conn.cursor()
         c.execute("SELECT DISTINCT patient_id FROM chat_history")
@@ -63,46 +71,88 @@ def proactive_clinical_checkin():
     except Exception as e:
         print(f"❌ Proactive Check-in Error: {e}")
 
+# Scheduler for proactive messages (Currently set to 60 minutes)
 scheduler = BackgroundScheduler()
-# For testing: triggers every 1 minute. Change to 'cron' for production.
 scheduler.add_job(proactive_clinical_checkin, 'interval', minutes=60)
 scheduler.start()
 
 @app.route("/sms", methods=['POST'])
 def sms_reply():
+    """
+    Main webhook for Twilio. Processes text, image, and voice (multilingual) messages.
+    """
     sender_number = request.values.get('From', '')
     msg_received = request.values.get('Body', '').strip()
     
     num_media = int(request.values.get('NumMedia', 0))
-    image_url = request.values.get('MediaUrl0', None) if num_media > 0 else None
+    image_url = None
 
+    # --- MULTIMEDIA HANDLING (Voice & Images) ---
+    if num_media > 0:
+        media_content_type = request.values.get('MediaContentType0', '')
+        media_url = request.values.get('MediaUrl0', '')
+
+        # 1. Handle Voice Messages via Whisper
+        if 'audio' in media_content_type:
+            print(f"🎤 Voice message received. Downloading from: {media_url}")
+            auth = (TWILIO_SID, TWILIO_AUTH)
+            response = requests.get(media_url, auth=auth)
+            
+            if response.status_code == 200:
+                temp_filename = f"temp_audio_{uuid.uuid4().hex}.ogg"
+                with open(temp_filename, "wb") as f:
+                    f.write(response.content)
+                
+                try:
+                    print("🎧 Processing audio with OpenAI Whisper...")
+                    with open(temp_filename, "rb") as audio_file:
+                        transcript = openai_client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=audio_file
+                        )
+                    # Overwrite empty text with transcribed voice text
+                    msg_received = transcript.text
+                    print(f"📝 Transcription result: {msg_received}")
+                except Exception as e:
+                    print(f"❌ Whisper transcription failed: {e}")
+                    msg_received = "System Note: Voice processing failed."
+                finally:
+                    if os.path.exists(temp_filename):
+                        os.remove(temp_filename)
+            else:
+                msg_received = "System Note: Failed to download voice message."
+                
+        # 2. Handle Image Messages (Existing logic)
+        elif 'image' in media_content_type:
+            image_url = media_url
+            print(f"🖼️ [Attachment Detected]: {image_url}")
+
+    # Prevent empty queries
     if not msg_received and not image_url:
         return str(MessagingResponse())
 
     print(f"\n--- New Incoming Message from {sender_number} ---")
-    if image_url:
-        print(f"[Attachment Detected]: {image_url}")
-    print(f"[Patient Text]: '{msg_received}'")
+    print(f"[Patient Text/Voice]: '{msg_received}'")
 
+    # Pass the text (or translated voice text) and image to your AI logic
     full_ai_response = get_ai_response(msg_received, conversation_history[sender_number], sender_number, image_url)
 
+    # Update conversation history
     history_msg = msg_received if msg_received else "[Uploaded Image]"
     conversation_history[sender_number].append({"user": history_msg, "ai": full_ai_response})
     
     if len(conversation_history[sender_number]) > 5:
         conversation_history[sender_number].pop(0)
     
+    # Clean up clinical tags before sending to patient
     display_response = full_ai_response
-    if "[SUMMARY]" in display_response:
-        display_response = display_response.split("[SUMMARY]")[0].strip()
-    if "[PROFILE]" in display_response:
-        display_response = display_response.split("[PROFILE]")[0].strip()
-    if "[HAUSER]" in display_response:
-        display_response = display_response.split("[HAUSER]")[0].strip()
-    if "[MOCA]" in display_response:
-        display_response = display_response.split("[MOCA]")[0].strip()
+    for tag in ["[SUMMARY]", "[PROFILE]", "[HAUSER]", "[MOCA]"]:
+        if tag in display_response:
+            display_response = display_response.split(tag)[0].strip()
 
     print(f"[AI] Sending reply to {sender_number}: {display_response}")
+    
+    # Send response back to WhatsApp
     resp = MessagingResponse()
     resp.message(display_response)
     return str(resp)
