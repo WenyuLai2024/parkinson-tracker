@@ -35,6 +35,7 @@ def proactive_clinical_checkin():
     """
     Proactive Ecological Momentary Assessment (EMA):
     Queries the cloud database for active patients and sends a scheduled clinical check-in message.
+    Includes defensive programming to handle dirty data without crashing the scheduler.
     """
     print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] ⏰ Running Proactive Check-in...")
     
@@ -60,22 +61,34 @@ def proactive_clinical_checkin():
 
         # Dispatch messages to all active patients via Twilio API
         for p in patients:
-            patient_phone = p[0]
-            msg = twilio_client.messages.create(
-                from_=TWILIO_NUMBER,
-                body=checkin_message,
-                to=patient_phone
-            )
-            print(f"✅ Proactive message sent to {patient_phone} (SID: {msg.sid})")
+            patient_phone = p[0].strip()
             
-            # Record the system-initiated message in the conversation history
-            conversation_history[patient_phone].append({
-                "user": "[System Proactive Trigger]", 
-                "ai": checkin_message
-            })
+            # --- 🛡️ Defensive Programming 1: Data Cleansing ---
+            # Ensure the phone number has the correct WhatsApp prefix for Twilio
+            if not patient_phone.startswith("whatsapp:"):
+                patient_phone = f"whatsapp:{patient_phone}"
+                
+            # --- 🛡️ Defensive Programming 2: Fault Isolation ---
+            # Wrap individual API calls in a try-except block so one failed number 
+            # does not interrupt the entire broadcast loop.
+            try:
+                msg = twilio_client.messages.create(
+                    from_=TWILIO_NUMBER,
+                    body=checkin_message,
+                    to=patient_phone
+                )
+                print(f"✅ Proactive message sent to {patient_phone} (SID: {msg.sid})")
+                
+                # Record the system-initiated message in the conversation history
+                conversation_history[patient_phone].append({
+                    "user": "[System Proactive Trigger]", 
+                    "ai": checkin_message
+                })
+            except Exception as inner_e:
+                print(f"⚠️ Failed to send proactive message to {patient_phone}. Reason: {inner_e}")
 
     except Exception as e:
-        print(f"❌ Proactive Check-in Error: {e}")
+        print(f"❌ Critical Database Error in Proactive Check-in: {e}")
 
 # --- Background Task Scheduler Setup ---
 scheduler = BackgroundScheduler()
@@ -146,30 +159,59 @@ def sms_reply():
     full_ai_response = get_ai_response(msg_received, conversation_history[sender_number], sender_number, image_url)
 
     # ==========================================
-    # 🚨 DIRECTION 3: Event-Driven Caregiver Alert System
+    # 🚨 DIRECTION 3: Upgraded Closed-Loop Caregiver Alert System
     # ==========================================
-    if "Severity: High" in full_ai_response or "[HAUSER] OFF" in full_ai_response:
-        print(f"🚨 [CRITICAL EVENT] High-risk symptoms detected for ({sender_number})! Triggering caregiver alert...")
-        caregiver_number = os.getenv("CAREGIVER_PHONE_NUMBER")
+    # Added [MOCA] Score: 0/3 detection logic as requested
+    if "Severity: High" in full_ai_response or "[HAUSER] OFF" in full_ai_response or "[MOCA] Score: 0/3" in full_ai_response:
+        print(f"🚨 [CRITICAL EVENT] High-risk symptoms or cognitive decline detected for ({sender_number})! Triggering alert...")
         
+        # Default fallback values
+        patient_name = "Unknown Patient"
+        caregiver_number = os.getenv("CAREGIVER_PHONE_NUMBER") 
+        
+        # Fetch dynamic patient profile and designated emergency contact from Supabase
+        try:
+            conn = psycopg2.connect(SUPABASE_URL)
+            c = conn.cursor()
+            c.execute("SELECT name, emergency_contact FROM patient_profiles WHERE patient_id = %s", (sender_number,))
+            result = c.fetchone()
+            
+            if result:
+                if result[0]:
+                    # Extract the first name for a more natural message (e.g., "John" from "John Doe")
+                    patient_name = result[0].split()[0]
+                if result[1]:
+                    # Override the environment variable with the database specific contact
+                    caregiver_number = result[1]
+            conn.close()
+        except Exception as e:
+            print(f"⚠️ Database query for patient profile failed: {e}")
+
+        # Ensure correct WhatsApp prefix for the caregiver number
+        if caregiver_number and not caregiver_number.startswith("whatsapp:"):
+            caregiver_number = f"whatsapp:{caregiver_number}"
+
         if caregiver_number:
+            # Construct the personalized clinical alert payload based on Direction 3 requirements
             alert_msg = (
                 f"🚨 [SYSTEM EMERGENCY ALERT]\n"
-                f"Your family member ({sender_number}) has just reported severe Parkinson's symptoms (High Severity or Severe Motor Fluctuation).\n"
+                f"Warning: {patient_name} ({sender_number}) has just reported severe symptoms "
+                f"(e.g., extreme stiffness or severe cognitive deviation in MoCA test).\n"
                 f"Please check on the patient's safety immediately!\n"
                 f"🔗 View detailed clinical data: https://parkinson-tracker-v1.streamlit.app/"
             )
             try:
+                # Dispatch the alert via Twilio concurrently
                 twilio_client.messages.create(
                     from_=TWILIO_NUMBER,
                     body=alert_msg,
                     to=caregiver_number
                 )
-                print(f"✅ Caregiver alert successfully sent to {caregiver_number}")
+                print(f"✅ Caregiver alert successfully sent to {caregiver_number} for patient {patient_name}")
             except Exception as e:
                 print(f"❌ Failed to send caregiver alert: {e}")
         else:
-            print("⚠️ CAREGIVER_PHONE_NUMBER is not configured in environment variables. Alert cancelled.")
+            print("⚠️ No caregiver number configured in DB or ENV. Alert cancelled.")
     # ==========================================
 
     # --- Session Management & Reply Formatting ---
