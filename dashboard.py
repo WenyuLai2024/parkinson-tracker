@@ -6,12 +6,18 @@ import psycopg2
 from openai import OpenAI
 from dotenv import load_dotenv
 
+# Load environment variables from the .env file
 load_dotenv()
+
+# Initialize OpenAI client and Supabase URL
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 SUPABASE_URL = os.getenv("SUPABASE_DB_URL")
 
+# --- UI Configuration ---
+# Set the page title, layout structure, and favicon
 st.set_page_config(page_title="Clinician Dashboard", layout="wide", page_icon="⚕️")
 
+# Custom CSS to improve dropdown menu interaction (UX improvement)
 st.markdown(
     """
     <style>
@@ -22,11 +28,12 @@ st.markdown(
 )
 
 try:
-    # Connecting to Cloud PostgreSQL and mapping to Pandas DataFrame
+    # --- Database Connection ---
+    # Connecting to Cloud PostgreSQL (Supabase)
     conn = psycopg2.connect(SUPABASE_URL)
     cur = conn.cursor()
     
-    # Fetch chat history
+    # 1. Fetch the entire chat history and map it to a Pandas DataFrame
     cur.execute("SELECT * FROM chat_history")
     history_rows = cur.fetchall()
     if history_rows:
@@ -35,7 +42,7 @@ try:
     else:
         raw_df = pd.DataFrame()
 
-    # Fetch patient profiles
+    # 2. Fetch patient profiles (Demographics, Meds, etc.)
     try:
         cur.execute("SELECT * FROM patient_profiles")
         profile_rows = cur.fetchall()
@@ -45,24 +52,34 @@ try:
         else:
             profiles_df = pd.DataFrame()
     except Exception:
+        # Fallback to empty dataframe if table doesn't exist yet
         profiles_df = pd.DataFrame()
         
     conn.close()
     
+    # Display warning if no data is found in the database
     if raw_df.empty:
         st.warning("No data found in the cloud database. Please initialize patient interactions via WhatsApp.")
 
+    # --- Main Dashboard Header ---
     st.title("Parkinson's Disease Longitudinal Tracker (Cloud-Native)")
 
+    # --- Sidebar & Navigation ---
     st.sidebar.header("Global Navigation")
     
+    # Extract unique patient IDs from the chat history
     raw_patient_list = raw_df['patient_id'].unique().tolist() if not raw_df.empty else []
     
+    # Create a dictionary mapping phone numbers to patient names
     profile_dict = {}
     if not profiles_df.empty:
         profile_dict = pd.Series(profiles_df.name.values, index=profiles_df.patient_id).to_dict()
 
     def generate_display_name(phone_str):
+        """
+        Anonymizes phone numbers for HIPAA/GDPR compliance and attaches the patient's name if available.
+        e.g., "John D. (***0684)"
+        """
         masked_phone = f"***{phone_str[-4:]}" if len(phone_str) >= 4 else "Unknown"
         if phone_str in profile_dict and profile_dict[phone_str] != "Unknown":
             full_name = profile_dict[phone_str]
@@ -71,6 +88,7 @@ try:
             return f"{first_name} {last_initial} ({masked_phone})"
         return f"Unknown Patient ({masked_phone})"
         
+    # Map display names back to raw phone numbers for querying
     display_to_raw_map = {generate_display_name(pid): pid for pid in raw_patient_list}
     display_names = list(display_to_raw_map.keys())
     
@@ -80,6 +98,7 @@ try:
     selected_display_name = st.sidebar.selectbox("Select Patient EHR:", options_list)
     st.sidebar.markdown("---")
     
+    # --- View: Home / Overview ---
     if selected_display_name == HOME_OPTION:
         st.sidebar.info("Data Privacy Mode: Patient identifiers are masked to comply with healthcare data protection regulations.")
         st.markdown("## 🏥 Welcome to the Clinical Decision Support System")
@@ -102,7 +121,9 @@ try:
         - **Conversational Hauser Diary**: Passively infers medication ON/OFF fluctuations.
         """)
         
+    # --- View: Individual Patient EHR ---
     else:
+        # Retrieve the raw phone number for the selected patient
         selected_patient_raw = display_to_raw_map[selected_display_name]
         df = raw_df[raw_df['patient_id'] == selected_patient_raw].copy()
 
@@ -118,9 +139,11 @@ try:
 
         tab1, tab2 = st.tabs(["📊 Clinical Dashboard", "💬 Raw Chat Transcript"])
         
+        # --- TAB 1: Clinical Dashboard (Visualizations) ---
         with tab1:
             st.markdown(f"### Clinician Portal: Electronic Health Record (EHR)")
             
+            # Display Patient Demographics Header
             if not profiles_df.empty:
                 patient_profile = profiles_df[profiles_df['patient_id'] == selected_patient_raw]
                 if not patient_profile.empty:
@@ -141,31 +164,43 @@ try:
                         st.info(f"**{profile_data['current_medication']}**")
                     st.divider()
             
-            extracted_symp = df['response'].str.extract(r"\[SUMMARY\] Symptom: (.*?), Severity: (.*?), Context: (.*)")
+            # ---------------------------------------------------------
+            # UPGRADED REGEX & SCORING LOGIC
+            # This regex captures the standard format AND ignores the optional ", Score: X" 
+            # ensuring backward compatibility with older logs.
+            extracted_symp = df['response'].str.extract(r"\[SUMMARY\] Symptom: (.*?), Severity: (.*?)(?:, Score: \d+)?, Context: (.*)")
             extracted_symp.columns = ['Symptom', 'Severity', 'Context']
             clinical_df = pd.concat([df, extracted_symp], axis=1).dropna(subset=['Symptom']).copy()
-            severity_weights = {"Low": 1, "Medium": 2, "High": 3}
+            
+            # Expanded severity mapping: "None" correctly maps to 0
+            severity_weights = {"None": 0, "Low": 1, "Medium": 2, "High": 3}
             clinical_df['Severity_Score'] = clinical_df['Severity'].map(severity_weights)
+            # ---------------------------------------------------------
 
+            # Extract Hauser Diary data
             extracted_hauser = df['response'].str.extract(r"\[HAUSER\] State: (.*?), Context: (.*)")
             extracted_hauser.columns = ['State', 'Context']
             hauser_df = pd.concat([df['timestamp'], extracted_hauser], axis=1).dropna(subset=['State']).copy()
             hauser_df['timestamp'] = pd.to_datetime(hauser_df['timestamp'])
 
+            # Extract MoCA Clock-Drawing data
             extracted_moca = df['response'].str.extract(r"\[MOCA\] Score: (.*?)/3, Context: (.*)")
             extracted_moca.columns = ['Score', 'Context']
             moca_df = pd.concat([df['timestamp'], extracted_moca], axis=1).dropna(subset=['Score']).copy()
             moca_df['timestamp'] = pd.to_datetime(moca_df['timestamp'])
             moca_df['Score'] = pd.to_numeric(moca_df['Score']) 
 
+            # --- Chart 1: Conversational Hauser Diary ---
             st.subheader("Conversational Hauser Diary (Motor Fluctuations)", anchor="hauser")
             if not hauser_df.empty:
                 hauser_colors = alt.Scale(domain=['ON', 'OFF', 'DYSKINESIA', 'ASLEEP'], range=['#28a745', '#dc3545', '#fd7e14', '#6c757d'])
                 hauser_df = hauser_df.sort_values('timestamp')
+                # Line chart representing transitions
                 line = alt.Chart(hauser_df).mark_line(interpolate='step-after', color='#adb5bd', strokeWidth=2, strokeDash=[5, 5]).encode(
                     x=alt.X('timestamp:T', title='Date & Time', axis=alt.Axis(format='%Y-%m-%d %H:%M', labelAngle=-45)),
                     y=alt.Y('State:N', title='Medication State', sort=['ON', 'DYSKINESIA', 'OFF', 'ASLEEP'])
                 )
+                # Scatter points indicating exact evaluation moments
                 points = alt.Chart(hauser_df).mark_circle(size=300, opacity=1).encode(
                     x='timestamp:T',
                     y=alt.Y('State:N', sort=['ON', 'DYSKINESIA', 'OFF', 'ASLEEP']),
@@ -178,6 +213,7 @@ try:
 
             st.divider()
 
+            # --- Chart 2: MoCA Cognitive Assessment ---
             st.subheader("Cognitive Assessment Trend (MoCA Clock-Drawing)", anchor="moca")
             if not moca_df.empty:
                 moca_df = moca_df.sort_values('timestamp')
@@ -193,6 +229,7 @@ try:
                 
             st.divider()
 
+            # --- Section: Symptom Logs & Trend ---
             left_col, right_col = st.columns([1.2, 2])
             with left_col:
                 st.subheader("Recent Clinical Logs", anchor="symptoms")
@@ -210,25 +247,28 @@ try:
                     clinical_df = clinical_df.sort_values(by='timestamp', ascending=True)
                     line_chart = alt.Chart(clinical_df).mark_line(point=True).encode(
                         x=alt.X('timestamp:T', title='Date & Time', axis=alt.Axis(format='%Y-%m-%d %H:%M', labelAngle=-45)),
-                        y=alt.Y('Severity_Score', scale=alt.Scale(domain=[0, 3.2]), title='Severity Score'),
+                        y=alt.Y('Severity_Score', scale=alt.Scale(domain=[-0.2, 3.2]), title='Severity Score'),
                         tooltip=['timestamp', 'Symptom', 'Severity', 'Context']
                     ).interactive()
                     st.altair_chart(line_chart, use_container_width=True)
-                    st.caption("Legend: 1=Low, 2=Medium, 3=High")
+                    st.caption("Legend: 0=None, 1=Low, 2=Medium, 3=High")
                 else:
                     st.warning("Insufficient data to generate trend analysis.")
             
             st.markdown("---")
-            st.subheader("AI Pre-Consultation Summary", anchor="report")
             
+            # --- AI Report Generator ---
+            st.subheader("AI Pre-Consultation Summary", anchor="report")
             if st.button("Generate Clinical Report"):
                 if not clinical_df.empty or not hauser_df.empty or not moca_df.empty:
                     with st.spinner("Analyzing patient records via GPT-4o..."):
                         try:
+                            # Aggregate recent data blocks for the prompt
                             symp_str = clinical_df[['timestamp', 'Symptom', 'Severity', 'Context']].tail(10).to_string() if not clinical_df.empty else "No symptom data."
                             hauser_str = hauser_df[['timestamp', 'State', 'Context']].tail(10).to_string() if not hauser_df.empty else "No Hauser data."
                             moca_str = moca_df[['timestamp', 'Score', 'Context']].tail(5).to_string() if not moca_df.empty else "No MoCA data."
                             
+                            # Construct the GPT prompt
                             prompt = f"""
                             You are a professional neurologist analyzing a Parkinson's patient's continuous tracking logs.
                             Patient Identifier: {selected_display_name}
@@ -245,6 +285,7 @@ try:
                             Please write a concise, professional clinical summary (max 3 paragraphs) including symptom trends, medication ON/OFF state patterns, cognitive trends, and recommendations.
                             """
                             
+                            # Request completion from OpenAI
                             response = client.chat.completions.create(
                                 model="gpt-4o",
                                 messages=[{"role": "user", "content": prompt}],
@@ -257,13 +298,17 @@ try:
                 else:
                     st.warning("Please collect more logs before generating a report.")
                     
+        # --- TAB 2: Raw Chat Transcript ---
         with tab2:
             st.markdown(f"### Interaction History for {selected_display_name}")
             chat_name = profile_dict.get(selected_patient_raw, "Unknown").split()[0] + " (Patient/Carer)" if selected_patient_raw in profile_dict and profile_dict[selected_patient_raw] != "Unknown" else "Unknown Patient"
             
             for index, row in df.iterrows():
+                # Display user's message
                 with st.chat_message("user", avatar="👤"): 
                     st.write(f"**{chat_name}** ({row['timestamp']}): {row['user_message']}")
+                
+                # Display AI's response (Strip out hidden backend tags for cleaner UI)
                 with st.chat_message("assistant", avatar="🤖"):
                     ai_text = str(row['response'])
                     for tag in ["[SUMMARY]", "[PROFILE]", "[HAUSER]", "[MOCA]"]:
