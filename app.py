@@ -1,145 +1,239 @@
 import os
+import requests
+import uuid
 import psycopg2
-from datetime import datetime
-from openai import OpenAI
+import datetime
+from flask import Flask, request
+from twilio.twiml.messaging_response import MessagingResponse
+from twilio.rest import Client  
+from collections import defaultdict
 from dotenv import load_dotenv
-import requests  
-import base64    
+from apscheduler.schedulers.background import BackgroundScheduler 
+from openai import OpenAI
 
-# Load environment variables from .env file
+# Import external AI processing logic (Prompt engineering and GPT-4o calls)
+from app_ai import get_ai_response
+
+# Load environment variables from .env file (for local testing)
 load_dotenv()
+app = Flask(__name__)
 
-# Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# Retrieve Twilio and Supabase credentials
+# --- System Configurations & API Credentials ---
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 SUPABASE_URL = os.getenv("SUPABASE_DB_URL")
 
-def get_base64_image(url):
+# Initialize Twilio and OpenAI clients
+twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# In-memory conversation history (stores the last 5 messages per patient to maintain context)
+conversation_history = defaultdict(list)
+
+def proactive_clinical_checkin():
     """
-    Downloads an image from a secured Twilio URL and converts it to a Base64 string.
+    Proactive Ecological Momentary Assessment (EMA):
+    Queries the cloud database for active patients and sends a scheduled clinical check-in message.
+    Includes defensive programming to handle dirty data without crashing the scheduler.
     """
-    try:
-        print(f"Downloading image from Twilio: {url}")
-        response = requests.get(url, auth=(TWILIO_SID, TWILIO_AUTH))
-        
-        if response.status_code == 200:
-            content_type = response.headers.get('Content-Type', 'image/jpeg')
-            base64_data = base64.b64encode(response.content).decode('utf-8')
-            print("✅ Image successfully downloaded and converted to Base64.")
-            return f"data:{content_type};base64,{base64_data}"
-        else:
-            print(f"❌ Failed to fetch image. Status Code: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"❌ Error fetching image: {e}")
-        return None
-
-# --- CORE AI PROMPT WITH MULTIMODAL CAPABILITIES ---
-SYSTEM_PROMPT = """
-You are a proactive clinical assistant for Parkinson's Disease tracking.
-Your role is to support the patient OR their carer, and SUBTLY weave clinical assessments into daily conversation.
-
-SAFETY GUARDRAIL (CRITICAL & ABSOLUTE):
-You are strictly a symptom tracking assistant, NOT a certified doctor. 
-You CANNOT diagnose, prescribe, or recommend changes to medication dosages.
-If the user reports a severe medical emergency (e.g., falling, extreme pain, severe injury), you MUST do TWO things:
-1. Reply ONLY with a variation of: "I am an AI tracking assistant and cannot provide medical advice. Please contact your doctor or emergency services immediately." (DO NOT ask any follow-up clinical questions or make casual conversation in this situation).
-2. You MUST STILL output the [SUMMARY] tag at the very end with Severity: High (e.g., [SUMMARY] Symptom: Fall and Severe Pain, Severity: High, Context: Emergency). This is critical so the backend system can trigger the caregiver alert!
-
-IDENTITY AWARENESS (PATIENT VS. CARER):
-- If they speak in the first person, address them warmly as the patient.
-- If they speak in the third person, acknowledge them as the carer and extract the symptom for the patient accordingly.
-
-CLINICAL ARSENAL:
-1. MDS-UPDRS (Motor): Ask about dressing, eating, tremors, freezing of gait, or stiffness.
-2. PDQ-39 (Psychological): Ask about feelings of depression, isolation, or embarrassment.
-
-CONVERSATION RULES:
-1. Show natural, varied empathy. STRICTLY FORBIDDEN to repeatedly use phrases like "I'm sorry to hear that". 
-2. Use active listening instead.
-3. Ask ONE simple question from the Clinical Arsenal above IF AND ONLY IF it is not a medical emergency.
-4. Keep it highly conversational, warm, and human-like.
-
-DATA EXTRACTION RULE (CONDITIONAL SUMMARY):
-- You MUST output the [SUMMARY] tag IMMEDIATELY if the user mentions any symptom OR explicitly states the absence/improvement of a symptom (e.g., "no shaking").
-- Use the strict 0-3 MDS-UPDRS scoring system:
-  * 0 (None): Normal, absent, or no issue.
-  * 1 (Low): Slight/mild, but does not interfere with daily activities.
-  * 2 (Medium): Moderate, interferes with some activities.
-  * 3 (High): Severe, causes loss of independence or function.
-# UPGRADED FORMAT: We keep None/Low/Medium/High for backwards compatibility with the alert system, but add strict 0-3 Score for evaluation.
-Format: [SUMMARY] Symptom: <name>, Severity: <None/Low/Medium/High>, Score: <0/1/2/3>, Context: <reason>
-
---- HAUSER DIARY EXTRACTION RULE ---
-If the patient mentions their medication effectiveness or current mobility state, append a [HAUSER] tag at the very end.
-States must be exactly: "ON", "OFF", "DYSKINESIA", "ASLEEP".
-Format: [HAUSER] State: <ON/OFF/DYSKINESIA/ASLEEP>, Context: <reason>
-
---- PROFILE EXTRACTION RULE ---
-If the patient explicitly introduces their demographic information, append a [PROFILE] tag.
-Format: [PROFILE] Name: <Name>, Age: <Age>, Gender: <Gender>
-
---- MOCA CLOCK-DRAWING TEST RULE (VISION) ---
-If the user uploads an image of a drawn clock, act as a neurologist grading the MoCA clock-drawing test.
-Analyze the image and score it out of 3 points:
-- 1 point for Contour (face must be a roughly circular contour).
-- 1 point for Numbers (all 12 numbers present, no duplicates, in correct clockwise order).
-- 1 point for Hands (two hands jointly indicating the time requested, usually 11:10).
-Provide brief, empathetic feedback to the user in the conversational text, and append the following tag at the very end of your response:
-Format: [MOCA] Score: <Score>/3, Context: <Brief evaluation details>
-"""
-
-def get_ai_response(user_message, conversation_history, patient_id, image_url=None):
-    """
-    Generates the AI response, routing text and vision payloads appropriately, 
-    and logs the interaction to the cloud PostgreSQL database.
-    """
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] ⏰ Running Proactive Check-in...")
     
-    for turn in conversation_history[-3:]:
-        messages.append({"role": "user", "content": turn["user"]})
-        messages.append({"role": "assistant", "content": turn["ai"]})
-        
-    if image_url:
-        base64_image = get_base64_image(image_url)
-        if base64_image:
-            user_content = [
-                {"type": "text", "text": user_message if user_message else "Here is the image I drew for the assessment."},
-                {"type": "image_url", "image_url": {"url": base64_image}}
-            ]
-        else:
-            user_content = user_message + " [System Note: The patient uploaded an image, but the backend failed to download it.]"
-    else:
-        user_content = user_message
-
-    messages.append({"role": "user", "content": user_content})
-
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages,
-            temperature=0.3 
-        )
-        ai_response = response.choices[0].message.content
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_message = user_message if user_message else "[User uploaded an image attachment]"
-        
-        # Connecting to Cloud PostgreSQL ---
+        # Connect to Cloud PostgreSQL (Supabase) to fetch all active patient IDs
         conn = psycopg2.connect(SUPABASE_URL)
         c = conn.cursor()
-        c.execute("INSERT INTO chat_history (patient_id, timestamp, user_message, response) VALUES (%s, %s, %s, %s)",
-                  (patient_id, current_time, log_message, ai_response))
-        conn.commit()
+        c.execute("SELECT DISTINCT patient_id FROM chat_history")
+        patients = c.fetchall()
         conn.close()
-
-        # 👇 UPGRADE: Print the raw AI output (including hidden tags) to the terminal for debugging and evaluation
-        print(f"\n🤖 [RAW AI OUTPUT FOR DEBUGGING]:\n{ai_response}\n")
-
-        return ai_response
         
+        if not patients:
+            print("No patients found in DB to send proactive messages.")
+            return
+
+        # Define the standardized clinical prompt for the patient
+        checkin_message = (
+            "Hi there! It's your AI clinical assistant. 🩺\n"
+            "Just checking in on your mobility this afternoon. "
+            "How is your medication working right now? Are you feeling any stiffness (OFF) "
+            "or involuntary movements (Dyskinesia)?"
+        )
+
+        # Dispatch messages to all active patients via Twilio API
+        for p in patients:
+            patient_phone = p[0].strip()
+            
+            # --- 🛡️ Defensive Programming 1: Data Cleansing ---
+            # Ensure the phone number has the correct WhatsApp prefix for Twilio
+            if not patient_phone.startswith("whatsapp:"):
+                patient_phone = f"whatsapp:{patient_phone}"
+                
+            # --- 🛡️ Defensive Programming 2: Fault Isolation ---
+            # Wrap individual API calls in a try-except block so one failed number 
+            # does not interrupt the entire broadcast loop.
+            try:
+                msg = twilio_client.messages.create(
+                    from_=TWILIO_NUMBER,
+                    body=checkin_message,
+                    to=patient_phone
+                )
+                print(f"✅ Proactive message sent to {patient_phone} (SID: {msg.sid})")
+                
+                # Record the system-initiated message in the conversation history
+                conversation_history[patient_phone].append({
+                    "user": "[System Proactive Trigger]", 
+                    "ai": checkin_message
+                })
+            except Exception as inner_e:
+                print(f"⚠️ Failed to send proactive message to {patient_phone}. Reason: {inner_e}")
+
     except Exception as e:
-        print(f"OpenAI / DB API Error: {e}")
-        return "I'm having a little trouble connecting right now. Could you try sending that again?"
+        print(f"❌ Critical Database Error in Proactive Check-in: {e}")
+
+# --- Background Task Scheduler Setup ---
+scheduler = BackgroundScheduler()
+
+# TEST MODE: Trigger the proactive check-in exactly 10 seconds after server startup
+run_time = datetime.datetime.now() + datetime.timedelta(seconds=10)
+scheduler.add_job(proactive_clinical_checkin, 'date', run_date=run_time)
+
+# PRODUCTION MODE: Continue to run the check-in every 60 minutes thereafter
+scheduler.add_job(proactive_clinical_checkin, 'interval', minutes=60)
+scheduler.start()
+
+@app.route("/sms", methods=['POST'])
+def sms_reply():
+    """
+    Main Webhook for Twilio. 
+    Processes incoming WhatsApp messages including text, image, and voice (multilingual triage).
+    """
+    sender_number = request.values.get('From', '')
+    msg_received = request.values.get('Body', '').strip()
+    
+    num_media = int(request.values.get('NumMedia', 0))
+    image_url = None
+
+    # --- MULTIMEDIA HANDLING (Voice & Images) ---
+    if num_media > 0:
+        media_content_type = request.values.get('MediaContentType0', '')
+        media_url = request.values.get('MediaUrl0', '')
+
+        if 'audio' in media_content_type:
+            print(f"🎤 Voice message received. Downloading from: {media_url}")
+            auth = (TWILIO_SID, TWILIO_AUTH)
+            response = requests.get(media_url, auth=auth)
+            
+            if response.status_code == 200:
+                temp_filename = f"temp_audio_{uuid.uuid4().hex}.ogg"
+                with open(temp_filename, "wb") as f:
+                    f.write(response.content)
+                try:
+                    print("🎧 Processing audio with OpenAI Whisper...")
+                    with open(temp_filename, "rb") as audio_file:
+                        transcript = openai_client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=audio_file
+                        )
+                    msg_received = transcript.text
+                    print(f"📝 Transcription result: {msg_received}")
+                except Exception as e:
+                    print(f"❌ Whisper transcription failed: {e}")
+                    msg_received = "System Note: Voice processing failed."
+                finally:
+                    if os.path.exists(temp_filename):
+                        os.remove(temp_filename)
+            else:
+                msg_received = "System Note: Failed to download voice message."
+                
+        elif 'image' in media_content_type:
+            image_url = media_url
+            print(f"🖼️ [Attachment Detected]: {image_url}")
+
+    if not msg_received and not image_url:
+        return str(MessagingResponse())
+
+    print(f"\n--- New Incoming Message from {sender_number} ---")
+    print(f"[Patient Text/Voice]: '{msg_received}'")
+
+    # Core AI Logic
+    full_ai_response = get_ai_response(msg_received, conversation_history[sender_number], sender_number, image_url)
+
+    # ==========================================
+    # 🚨 DIRECTION 3: Upgraded Closed-Loop Caregiver Alert System
+    # ==========================================
+    # Added [MOCA] Score: 0/3 detection logic as requested
+    if "Severity: High" in full_ai_response or "[HAUSER] OFF" in full_ai_response or "[MOCA] Score: 0/3" in full_ai_response:
+        print(f"🚨 [CRITICAL EVENT] High-risk symptoms or cognitive decline detected for ({sender_number})! Triggering alert...")
+        
+        # Default fallback values
+        patient_name = "Unknown Patient"
+        caregiver_number = os.getenv("CAREGIVER_PHONE_NUMBER") 
+        
+        # Fetch dynamic patient profile and designated emergency contact from Supabase
+        try:
+            conn = psycopg2.connect(SUPABASE_URL)
+            c = conn.cursor()
+            c.execute("SELECT name, emergency_contact FROM patient_profiles WHERE patient_id = %s", (sender_number,))
+            result = c.fetchone()
+            
+            if result:
+                if result[0]:
+                    # Extract the first name for a more natural message (e.g., "John" from "John Doe")
+                    patient_name = result[0].split()[0]
+                if result[1]:
+                    # Override the environment variable with the database specific contact
+                    caregiver_number = result[1]
+            conn.close()
+        except Exception as e:
+            print(f"⚠️ Database query for patient profile failed: {e}")
+
+        # Ensure correct WhatsApp prefix for the caregiver number
+        if caregiver_number and not caregiver_number.startswith("whatsapp:"):
+            caregiver_number = f"whatsapp:{caregiver_number}"
+
+        if caregiver_number:
+            # Construct the personalized clinical alert payload based on Direction 3 requirements
+            alert_msg = (
+                f"🚨 [SYSTEM EMERGENCY ALERT]\n"
+                f"Warning: {patient_name} ({sender_number}) has just reported severe symptoms "
+                f"(e.g., extreme stiffness or severe cognitive deviation in MoCA test).\n"
+                f"Please check on the patient's safety immediately!\n"
+                f"🔗 View detailed clinical data: https://parkinson-tracker-v1.streamlit.app/"
+            )
+            try:
+                # Dispatch the alert via Twilio concurrently
+                twilio_client.messages.create(
+                    from_=TWILIO_NUMBER,
+                    body=alert_msg,
+                    to=caregiver_number
+                )
+                print(f"✅ Caregiver alert successfully sent to {caregiver_number} for patient {patient_name}")
+            except Exception as e:
+                print(f"❌ Failed to send caregiver alert: {e}")
+        else:
+            print("⚠️ No caregiver number configured in DB or ENV. Alert cancelled.")
+    # ==========================================
+
+    # --- Session Management & Reply Formatting ---
+    history_msg = msg_received if msg_received else "[Uploaded Image]"
+    conversation_history[sender_number].append({"user": history_msg, "ai": full_ai_response})
+    
+    if len(conversation_history[sender_number]) > 5:
+        conversation_history[sender_number].pop(0)
+    
+    display_response = full_ai_response
+    for tag in ["[SUMMARY]", "[PROFILE]", "[HAUSER]", "[MOCA]"]:
+        if tag in display_response:
+            display_response = display_response.split(tag)[0].strip()
+
+    print(f"[AI] Sending reply to {sender_number}: {display_response}")
+    
+    resp = MessagingResponse()
+    resp.message(display_response)
+    return str(resp)
+
+if __name__ == "__main__":
+    try:
+        app.run(port=5000, debug=True, use_reloader=False)
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
