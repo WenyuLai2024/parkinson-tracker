@@ -14,7 +14,7 @@ from openai import OpenAI
 # Import external AI processing logic (Prompt engineering and GPT-4o calls)
 from app_ai import get_ai_response
 
-# Load environment variables from .env file (for local testing)
+# Load environment variables from .env file
 load_dotenv()
 app = Flask(__name__)
 
@@ -31,11 +31,24 @@ openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # In-memory conversation history (stores the last 5 messages per patient to maintain context)
 conversation_history = defaultdict(list)
 
+# ==========================================
+# 🟢 ANTI-SLEEP / KEEP-ALIVE ENDPOINT (SOLUTION A)
+# ==========================================
+@app.route("/ping", methods=['GET'])
+def keep_alive():
+    """
+    Endpoint for external cron jobs (e.g., cron-job.org) to ping every 10 minutes.
+    This prevents the Render free tier instance from entering a sleep state, 
+    thereby eliminating Twilio's 11200 HTTP retrieval failure (timeout) during cold starts.
+    """
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"🔄 [Keep-Alive Ping Received] Server is awake at {current_time}")
+    return "Server is awake and running!", 200
+
 def proactive_clinical_checkin():
     """
     Proactive Ecological Momentary Assessment (EMA):
     Queries the cloud database for active patients and sends a scheduled clinical check-in message.
-    Includes defensive programming to handle dirty data without crashing the scheduler.
     """
     print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] ⏰ Running Proactive Check-in...")
     
@@ -63,14 +76,10 @@ def proactive_clinical_checkin():
         for p in patients:
             patient_phone = p[0].strip()
             
-            # --- 🛡️ Defensive Programming 1: Data Cleansing ---
-            # Ensure the phone number has the correct WhatsApp prefix for Twilio
+            # Defensive Programming: Ensure WhatsApp prefix exists
             if not patient_phone.startswith("whatsapp:"):
                 patient_phone = f"whatsapp:{patient_phone}"
                 
-            # --- 🛡️ Defensive Programming 2: Fault Isolation ---
-            # Wrap individual API calls in a try-except block so one failed number 
-            # does not interrupt the entire broadcast loop.
             try:
                 msg = twilio_client.messages.create(
                     from_=TWILIO_NUMBER,
@@ -93,11 +102,7 @@ def proactive_clinical_checkin():
 # --- Background Task Scheduler Setup ---
 scheduler = BackgroundScheduler()
 
-# TEST MODE: Trigger the proactive check-in exactly 10 seconds after server startup
-run_time = datetime.datetime.now() + datetime.timedelta(seconds=10)
-scheduler.add_job(proactive_clinical_checkin, 'date', run_date=run_time)
-
-# PRODUCTION MODE: Continue to run the check-in every 60 minutes thereafter
+# Continue to run the check-in every 60 minutes
 scheduler.add_job(proactive_clinical_checkin, 'interval', minutes=60)
 scheduler.start()
 
@@ -158,18 +163,13 @@ def sms_reply():
     # Core AI Logic
     full_ai_response = get_ai_response(msg_received, conversation_history[sender_number], sender_number, image_url)
 
-    # ==========================================
-    # 🚨 DIRECTION 3: Upgraded Closed-Loop Caregiver Alert System
-    # ==========================================
-    # Added [MOCA] Score: 0/3 detection logic as requested
+    # --- Caregiver Alert System ---
     if "Severity: High" in full_ai_response or "[HAUSER] OFF" in full_ai_response or "[MOCA] Score: 0/3" in full_ai_response:
         print(f"🚨 [CRITICAL EVENT] High-risk symptoms or cognitive decline detected for ({sender_number})! Triggering alert...")
         
-        # Default fallback values
         patient_name = "Unknown Patient"
         caregiver_number = os.getenv("CAREGIVER_PHONE_NUMBER") 
         
-        # Fetch dynamic patient profile and designated emergency contact from Supabase
         try:
             conn = psycopg2.connect(SUPABASE_URL)
             c = conn.cursor()
@@ -178,21 +178,17 @@ def sms_reply():
             
             if result:
                 if result[0]:
-                    # Extract the first name for a more natural message (e.g., "John" from "John Doe")
                     patient_name = result[0].split()[0]
                 if result[1]:
-                    # Override the environment variable with the database specific contact
                     caregiver_number = result[1]
             conn.close()
         except Exception as e:
             print(f"⚠️ Database query for patient profile failed: {e}")
 
-        # Ensure correct WhatsApp prefix for the caregiver number
         if caregiver_number and not caregiver_number.startswith("whatsapp:"):
             caregiver_number = f"whatsapp:{caregiver_number}"
 
         if caregiver_number:
-            # Construct the personalized clinical alert payload based on Direction 3 requirements
             alert_msg = (
                 f"🚨 [SYSTEM EMERGENCY ALERT]\n"
                 f"Warning: {patient_name} ({sender_number}) has just reported severe symptoms "
@@ -201,7 +197,6 @@ def sms_reply():
                 f"🔗 View detailed clinical data: https://parkinson-tracker-v1.streamlit.app/"
             )
             try:
-                # Dispatch the alert via Twilio concurrently
                 twilio_client.messages.create(
                     from_=TWILIO_NUMBER,
                     body=alert_msg,
@@ -212,7 +207,6 @@ def sms_reply():
                 print(f"❌ Failed to send caregiver alert: {e}")
         else:
             print("⚠️ No caregiver number configured in DB or ENV. Alert cancelled.")
-    # ==========================================
 
     # --- Session Management & Reply Formatting ---
     history_msg = msg_received if msg_received else "[Uploaded Image]"
