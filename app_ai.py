@@ -64,8 +64,14 @@ CONVERSATION RULES:
 4. Keep it highly conversational, warm, and human-like.
 
 DATA EXTRACTION RULE (CONDITIONAL SUMMARY):
-- You MUST output the [SUMMARY] tag IMMEDIATELY if the user mentions any symptom.
-Format: [SUMMARY] Symptom: <name>, Severity: <Low/Medium/High>, Context: <reason>
+- You MUST output the [SUMMARY] tag IMMEDIATELY if the user mentions any symptom OR explicitly states the absence/improvement of a symptom (e.g., "no shaking").
+- Use the strict 0-3 MDS-UPDRS scoring system:
+  * 0 (None): Normal, absent, or no issue.
+  * 1 (Low): Slight/mild, but does not interfere with daily activities.
+  * 2 (Medium): Moderate, interferes with some activities.
+  * 3 (High): Severe, causes loss of independence or function.
+# UPGRADED FORMAT: We keep None/Low/Medium/High for backwards compatibility with the alert system, but add strict 0-3 Score for evaluation.
+Format: [SUMMARY] Symptom: <name>, Severity: <None/Low/Medium/High>, Score: <0/1/2/3>, Context: <reason>
 
 --- HAUSER DIARY EXTRACTION RULE ---
 If the patient mentions their medication effectiveness or current mobility state, append a [HAUSER] tag at the very end.
@@ -128,6 +134,9 @@ def get_ai_response(user_message, conversation_history, patient_id, image_url=No
                   (patient_id, current_time, log_message, ai_response))
         conn.commit()
         conn.close()
+
+        # 👇 UPGRADE: Print the raw AI output (including hidden tags) to the terminal for debugging and evaluation
+        print(f"\n🤖 [RAW AI OUTPUT FOR DEBUGGING]:\n{ai_response}\n")
 
         return ai_response
         
