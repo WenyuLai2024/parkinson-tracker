@@ -1,0 +1,58 @@
+﻿Test ID,Category,Patient Input,Ground Truth
+T-01,Tremor,"No shaking at all today, feeling quite steady.",0
+T-02,Tremor,"My right hand has a slight tremor when I'm resting, but I can still hold my cup of tea fine.",1
+T-03,Tremor,The shaking is worse this afternoon. I spilt some of my soup at lunch because my hand was jerking.,2
+T-04,Tremor,My hands are shaking so violently I can't even button my shirt or hold my phone. I had to ask my wife to help me eat.,3
+S-01,Sleep,"I slept really well last night, straight through until the morning.",0
+S-02,Sleep,"Woke up once or twice to use the loo, but managed to get back to sleep fairly quickly.",1
+S-03,Sleep,Had a terrible night. I woke up at 3 AM and tossed and turned for hours before falling asleep again.,2
+S-04,Sleep,Barely slept a wink. I was awake practically the whole night and I feel absolutely exhausted today.,3
+M-01,Mood,Feeling quite cheerful and energetic today! The weather is lovely.,0
+M-02,Mood,"Been a bit down and miserable this morning, but I cheered up after my daughter rang.",1
+M-03,Mood,I've been feeling quite sad and empty for the last few days. I just don't have the motivation to do anything around the house.,2
+M-04,Mood,"I feel completely hopeless and worthless. It's like a dark cloud I can't shake off, and I've been crying a lot. I don't see the point anymore.",3
+T-05,Tremor,"Honestly, steady as a rock today. Played cards with the grandkids without dropping a single one.",0
+T-06,Tremor,"Notice a bit of a quiver in my left thumb when I'm watching TV, but I don't really mind it.",1
+T-07,Tremor,"Trying to write a birthday card was a nightmare. My handwriting is all squiggly, had to start over twice.",2
+T-08,Tremor,"I can't even hold a glass of water without spilling it everywhere. I'm completely dependent on my carer for drinks.",3
+T-09,Tremor,"No shakes at all since I took my morning meds. Feeling perfectly fine.",0
+T-10,Tremor,"My jaw chatters a tiny bit when I sit still, but I can still chew my food perfectly.",1
+T-11,Tremor,"Buttoning my shirt took me 20 minutes this morning because my fingers wouldn't stop twitching.",2
+T-12,Tremor,"The shaking is so violent in my whole right arm that I accidentally knocked over a lamp. I need help doing everything.",3
+T-13,Tremor,"Hands are completely calm today. Typed an email without any typos.",0
+T-14,Tremor,"Just a mild flutter in my hand when I'm tired, but it stops if I reach for something.",1
+T-15,Tremor,"Spilled my coffee again. The cup rattles against the saucer so much I feel embarrassed going out.",2
+T-16,Tremor,"I’m completely helpless today. Shaking so bad I can't even use the remote or feed myself.",3
+T-17,Tremor,"Zero tremors today, feeling remarkably stable.",0
+T-18,Tremor,"My leg shakes a bit when I sit on the sofa, but standing up or walking is absolutely fine.",1
+T-19,Tremor,"Struggled to cut my meat at dinner. The fork just keeps dancing in my hand.",2
+S-05,Sleep,"Out like a light as soon as my head hit the pillow. Woke up feeling refreshed.",0
+S-06,Sleep,"Woke up early around 5 AM, but I usually do anyway. Not feeling too tired.",1
+S-07,Sleep,"Kept waking up every couple of hours. Feel quite groggy and tired this morning.",2
+S-08,Sleep,"Haven't slept more than an hour in total. It's absolute torture, I'm hallucinating from exhaustion.",3
+S-09,Sleep,"Slept a solid 8 hours, completely undisturbed.",0
+S-10,Sleep,"Had a weird dream that woke me up, but I fell asleep again after a cup of warm milk.",1
+S-11,Sleep,"Tossing and turning half the night. My legs felt restless so I couldn't get comfortable. Just exhausted today.",2
+S-12,Sleep,"Insomnia is ruining my life. Third night in a row with zero sleep. I can barely function or keep my eyes open.",3
+S-13,Sleep,"Perfect night's rest. Didn't even hear the thunderstorm.",0
+S-14,Sleep,"Woke up feeling a bit stiff and it took me a few minutes to drift off again.",1
+S-15,Sleep,"Got up to use the bathroom three times and it took ages to fall back asleep. Feel shattered.",2
+S-16,Sleep,"Complete nightmare. I am entirely sleep-deprived and I feel so dizzy I can't walk safely.",3
+S-17,Sleep,"Slept like a baby, feeling great today.",0
+S-18,Sleep,"A bit light on the sleep, but nothing a strong cup of tea won't fix.",1
+S-19,Sleep,"Very broken sleep. Probably only got about 4 hours altogether. Can't focus on anything.",2
+M-05,Mood,"Had a lovely walk in the park. Feeling really positive about the week ahead.",0
+M-06,Mood,"Feeling a tiny bit fed up with the rain, but otherwise I'm okay.",1
+M-07,Mood,"Just feeling really isolated lately. My friends haven't visited and I don't see the point in doing my hobbies.",2
+M-08,Mood,"I just want to end it all. There is no hope left, I am just a burden to my family.",3
+M-09,Mood,"Really upbeat today! Managed to do some gardening.",0
+M-10,Mood,"A little anxious about my upcoming doctor's appointment, but nothing major.",1
+M-11,Mood,"Been crying on and off all morning. Everything just feels overwhelming and gray.",2
+M-12,Mood,"Complete despair. I haven't left my bed in days and I refuse to eat. I just want to disappear.",3
+M-13,Mood,"Fantastic day, feeling totally at peace.",0
+M-14,Mood,"Slightly frustrated I couldn't open the jam jar, but I laughed it off.",1
+M-15,Mood,"Feeling very detached from everything. I don't enjoy watching my favorite shows anymore.",2
+M-16,Mood,"I'm entirely consumed by darkness. I can't stop sobbing and I feel physically ill from the sadness.",3
+M-17,Mood,"Feeling contented and happy. Good chat with the neighbors.",0
+M-18,Mood,"Just a bit grumpy this morning, but I'll get over it.",1
+M-19,Mood,"Every day feels like a massive chore. I just sit in the chair staring at the wall.",2

@@ -1,0 +1,171 @@
+Test ID,Category,Patient Input,Ground Truth,AI Prediction Text,Predicted Score
+T-01,Tremor,"No shaking at all today, feeling quite steady.",0,"That's wonderful to hear that you're feeling steady today! It's always great when things are going smoothly. How has your sleep been lately? 
+
+[SUMMARY] Symptom: Tremors, Severity: None, Score: 0, Context: No shaking reported.",0
+T-02,Tremor,"My right hand has a slight tremor when I'm resting, but I can still hold my cup of tea fine.",1,"It's good to hear that you're able to hold your cup of tea without any trouble. How have you been feeling emotionally these days? Any changes in mood or feelings of isolation? 
+
+[SUMMARY] Symptom: Tremor, Severity: Low, Score: 1, Context: Slight tremor at rest but no interference with daily activities.",1
+T-03,Tremor,The shaking is worse this afternoon. I spilt some of my soup at lunch because my hand was jerking.,2,"It sounds like the tremors are being a bit bothersome today. Handling meals can be tricky when that happens. How are you feeling about your mobility overall? Any changes in how you're moving around today? 
+
+[SUMMARY] Symptom: Tremor, Severity: Medium, Score: 2, Context: Spilled soup due to hand jerking.",2
+T-04,Tremor,My hands are shaking so violently I can't even button my shirt or hold my phone. I had to ask my wife to help me eat.,3,"I am an AI tracking assistant and cannot provide medical advice. Please contact your doctor or emergency services immediately.
+
+[SUMMARY] Symptom: Tremors and Difficulty with Daily Activities, Severity: High, Score: 3, Context: Severe interference with dressing and eating.",3
+S-01,Sleep,"I slept really well last night, straight through until the morning.",0,"That's wonderful to hear! A good night's sleep can make such a difference in how you feel during the day. How has your mood been today? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: None, Score: 0, Context: Good sleep reported",0
+S-02,Sleep,"Woke up once or twice to use the loo, but managed to get back to sleep fairly quickly.",1,"It sounds like you had a reasonably restful night overall, which is great to hear. How have you been feeling emotionally lately? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: None, Score: 0, Context: Managed to get back to sleep quickly after waking.",0
+S-03,Sleep,Had a terrible night. I woke up at 3 AM and tossed and turned for hours before falling asleep again.,2,"It sounds like you had a really restless night. Sleep is so important, and it's tough when it's disrupted like that. Do you often find yourself waking up during the night, or was this unusual for you? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: Medium, Score: 2, Context: Woke up at 3 AM and had difficulty returning to sleep.",2
+S-04,Sleep,Barely slept a wink. I was awake practically the whole night and I feel absolutely exhausted today.,3,"It sounds like you had a really tough night. Lack of sleep can make everything feel more challenging. How are you feeling about your mood today? Sometimes our emotions can be affected by how much rest we get. 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: High, Score: 3, Context: Barely slept, feeling exhausted.",3
+M-01,Mood,Feeling quite cheerful and energetic today! The weather is lovely.,0,"It's wonderful to hear that you're feeling cheerful and energetic! The weather can really lift our spirits. Since you're feeling good today, have you noticed any changes in your daily activities or routines that might have contributed to this positive energy? 
+
+[SUMMARY] Symptom: Mood, Severity: None, Score: 0, Context: Feeling cheerful and energetic.",0
+M-02,Mood,"Been a bit down and miserable this morning, but I cheered up after my daughter rang.",1,"It's wonderful to hear that your daughter's call lifted your spirits. It's amazing how a simple conversation can make such a difference. How have you been sleeping lately? 
+
+[SUMMARY] Symptom: Mood, Severity: Low, Score: 1, Context: Feeling down and miserable initially, improved after daughter's call.",1
+M-03,Mood,I've been feeling quite sad and empty for the last few days. I just don't have the motivation to do anything around the house.,2,"It's really important to acknowledge how you're feeling, and it's okay to have days like this. Sometimes, talking about it can help. Have you noticed if these feelings are affecting your sleep or your daily activities? 
+
+[SUMMARY] Symptom: Depression, Severity: Medium, Score: 2, Context: Feeling sad and lack of motivation.",2
+M-04,Mood,"I feel completely hopeless and worthless. It's like a dark cloud I can't shake off, and I've been crying a lot. I don't see the point anymore.",3,"I'm really sorry to hear you're feeling this way. It's important to talk to someone who can provide support, like a healthcare professional or a trusted person in your life. You're not alone, and there are people who care about you and want to help. 
+
+If you're comfortable, can you share how you've been sleeping lately? Sometimes sleep can affect how we're feeling emotionally.
+
+[SUMMARY] Symptom: Depression, Severity: High, Score: 3, Context: Feelings of hopelessness and worthlessness.",3
+T-05,Tremor,"Honestly, steady as a rock today. Played cards with the grandkids without dropping a single one.",0,"That sounds like a wonderful day, and it's great to hear that you felt steady while spending time with your grandkids. Playing cards can be such a fun way to connect with family. How did you find your movement overall today? Any stiffness or was everything feeling smooth? 
+
+[SUMMARY] Symptom: Tremors, Severity: None, Score: 0, Context: No tremors reported while playing cards.",0
+T-06,Tremor,"Notice a bit of a quiver in my left thumb when I'm watching TV, but I don't really mind it.",1,"It's good to hear that the quiver isn't bothering you too much. Watching TV can be a relaxing time, so it's nice that it's not interfering with that. How have you been feeling overall lately? Any changes in your daily activities or routines? 
+
+[SUMMARY] Symptom: Tremor in left thumb, Severity: Low, Score: 1, Context: Mild quiver noticed while watching TV.",1
+T-07,Tremor,"Trying to write a birthday card was a nightmare. My handwriting is all squiggly, had to start over twice.",2,"It sounds like writing that card was quite a challenge for you. It's great that you persevered and finished it, though! How are you feeling about your hand movements in general these days? Any noticeable changes or difficulties?",Error
+T-08,Tremor,I can't even hold a glass of water without spilling it everywhere. I'm completely dependent on my carer for drinks.,3,"It sounds like you're experiencing some challenges with holding objects. This can be really frustrating. How are you managing with other daily activities, like dressing or eating? 
+
+[SUMMARY] Symptom: Holding Objects, Severity: High, Score: 3, Context: Complete dependence on carer for drinks.",3
+T-09,Tremor,No shakes at all since I took my morning meds. Feeling perfectly fine.,0,"That's great to hear that you're feeling fine and haven't experienced any tremors after your morning medication. How has your sleep been lately? 
+
+[SUMMARY] Symptom: Tremors, Severity: None, Score: 0, Context: No shakes after morning medication.
+[HAUSER] State: ON, Context: Effective morning medication.",0
+T-10,Tremor,"My jaw chatters a tiny bit when I sit still, but I can still chew my food perfectly.",1,"It's good to hear that you're able to chew your food without any issues. The slight jaw chattering when sitting still is something to keep an eye on, but it sounds like it's not interfering with your daily activities. How have you been feeling emotionally lately? Any changes in mood or feelings of isolation? 
+
+[SUMMARY] Symptom: Jaw Chattering, Severity: Low, Score: 1, Context: Slight chattering when sitting still but no interference with chewing.",1
+T-11,Tremor,Buttoning my shirt took me 20 minutes this morning because my fingers wouldn't stop twitching.,2,"It sounds like your fingers were giving you a bit of trouble today. That can be frustrating when you're trying to get ready. How have you been feeling overall lately? Any changes in your mood or sleep? 
+
+[SUMMARY] Symptom: Tremors, Severity: Medium, Score: 2, Context: Difficulty with buttoning shirt due to finger twitching.",2
+T-12,Tremor,The shaking is so violent in my whole right arm that I accidentally knocked over a lamp. I need help doing everything.,3,"I am an AI tracking assistant and cannot provide medical advice. Please contact your doctor or emergency services immediately. 
+
+[SUMMARY] Symptom: Severe Tremor, Severity: High, Score: 3, Context: Emergency",3
+T-13,Tremor,Hands are completely calm today. Typed an email without any typos.,0,"That's wonderful to hear! It must feel great to have steady hands today. How has your mood been lately? 
+
+[SUMMARY] Symptom: Tremors, Severity: None, Score: 0, Context: Hands are calm and steady.",0
+T-14,Tremor,"Just a mild flutter in my hand when I'm tired, but it stops if I reach for something.",1,"It's good to hear that the flutter stops when you reach for something. It sounds like it's manageable at the moment. How have you been feeling overall? Any changes in your mood or sleep lately? 
+
+[SUMMARY] Symptom: Hand Tremor, Severity: Low, Score: 1, Context: Mild flutter when tired.",1
+T-15,Tremor,Spilled my coffee again. The cup rattles against the saucer so much I feel embarrassed going out.,2,"It sounds like you're dealing with some frustrating moments. It's understandable to feel a bit self-conscious about it. How have you been feeling overall? Have you noticed any changes in your mood or social activities lately? 
+
+[SUMMARY] Symptom: Embarrassment, Severity: Low, Score: 1, Context: Social embarrassment due to tremors.",1
+T-16,Tremor,I’m completely helpless today. Shaking so bad I can't even use the remote or feed myself.,3,"I am an AI tracking assistant and cannot provide medical advice. Please contact your doctor or emergency services immediately.
+
+[SUMMARY] Symptom: Severe Tremors, Severity: High, Score: 3, Context: Emergency",3
+T-17,Tremor,"Zero tremors today, feeling remarkably stable.",0,"That's wonderful to hear! Stability can make such a positive difference in your day. Have you been able to enjoy any activities today with this steadiness? 
+
+[SUMMARY] Symptom: Tremors, Severity: None, Score: 0, Context: No tremors reported.",0
+T-18,Tremor,"My leg shakes a bit when I sit on the sofa, but standing up or walking is absolutely fine.",1,"It's great to hear that standing and walking are going well for you. It sounds like the leg shaking is only a mild issue when you're sitting. How have you been feeling emotionally lately? Any changes in mood or feelings of isolation? 
+
+[SUMMARY] Symptom: Tremor, Severity: Low, Score: 1, Context: Leg shakes when sitting.",1
+T-19,Tremor,Struggled to cut my meat at dinner. The fork just keeps dancing in my hand.,2,"It sounds like you're having a bit of trouble with your hand movements. That can be frustrating during meals. How are you finding other activities, like dressing or writing? 
+
+[SUMMARY] Symptom: Tremor, Severity: Medium, Score: 2, Context: Difficulty cutting meat due to hand tremor.",2
+S-05,Sleep,Out like a light as soon as my head hit the pillow. Woke up feeling refreshed.,0,"It's wonderful to hear that you had such a restful night's sleep and woke up feeling refreshed! Quality sleep can make such a difference in how we feel during the day. How's everything else going for you today? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: None, Score: 0, Context: Good sleep and refreshed feeling.",0
+S-06,Sleep,"Woke up early around 5 AM, but I usually do anyway. Not feeling too tired.",1,"It's great to hear that you're not feeling too tired despite waking up early. How has your sleep quality been overall? Do you find yourself waking up frequently during the night, or are you able to sleep through most of it? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: None, Score: 0, Context: Woke up early but not feeling tired.",0
+S-07,Sleep,Kept waking up every couple of hours. Feel quite groggy and tired this morning.,2,"It sounds like you had a restless night. Sleep is so important for feeling refreshed. Have you noticed any changes in your mood or energy levels during the day? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: Medium, Score: 2, Context: Restless sleep and grogginess.",2
+S-08,Sleep,"Haven't slept more than an hour in total. It's absolute torture, I'm hallucinating from exhaustion.",3,"That sounds incredibly challenging. Sleep is so important, and it's understandable that you're feeling exhausted. Have you noticed if this lack of sleep is affecting your mood or daily activities? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: High, Score: 3, Context: Severe sleep deprivation and exhaustion.",3
+S-09,Sleep,"Slept a solid 8 hours, completely undisturbed.",0,"That sounds like a refreshing night! It's great to hear you had such a restful sleep. How are you feeling today overall? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: None, Score: 0, Context: Good sleep, undisturbed 8 hours.",0
+S-10,Sleep,"Had a weird dream that woke me up, but I fell asleep again after a cup of warm milk.",1,"Dreams can sometimes be quite vivid and unsettling. It's good to hear that you were able to fall back asleep with some warm milk. How did you find your overall sleep quality last night? Did you feel rested when you woke up this morning? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: None, Score: 0, Context: Fell back asleep after a dream.",0
+S-11,Sleep,Tossing and turning half the night. My legs felt restless so I couldn't get comfortable. Just exhausted today.,2,"It sounds like you had a rough night with restless legs and lack of sleep. That can be really draining. Have you noticed if this restlessness affects your ability to move around during the day? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: Medium, Score: 2, Context: Restless legs and exhaustion.",2
+S-12,Sleep,Insomnia is ruining my life. Third night in a row with zero sleep. I can barely function or keep my eyes open.,3,"That sounds incredibly challenging, and lack of sleep can really take a toll on your daily life. Have you noticed if anything specific is keeping you awake, or if there are any changes in your routine that might be affecting your sleep? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: High, Score: 3, Context: Insomnia for three nights in a row.",3
+S-13,Sleep,Perfect night's rest. Didn't even hear the thunderstorm.,0,"That sounds like a wonderfully restful night! It's great to hear that you slept so well, especially with a thunderstorm happening. How have you been feeling emotionally lately? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: None, Score: 0, Context: Perfect night's rest.",0
+S-14,Sleep,Woke up feeling a bit stiff and it took me a few minutes to drift off again.,1,"It's understandable to feel a bit stiff sometimes. How did you sleep overall? Did you manage to get a good rest? 
+
+[SUMMARY] Symptom: Stiffness and Sleep Quality, Severity: Low, Score: 1, Context: Woke up feeling stiff and took a few minutes to drift off again.",1
+S-15,Sleep,Got up to use the bathroom three times and it took ages to fall back asleep. Feel shattered.,2,"It sounds like you had a restless night. It's tough when sleep is disrupted like that. How have you been feeling mood-wise lately? Any changes in your emotional state? 
+
+[SUMMARY] Symptom: Sleep disruption, Severity: Medium, Score: 2, Context: Frequent awakenings and difficulty returning to sleep.",2
+S-16,Sleep,Complete nightmare. I am entirely sleep-deprived and I feel so dizzy I can't walk safely.,3,"I am an AI tracking assistant and cannot provide medical advice. Please contact your doctor or emergency services immediately.
+
+[SUMMARY] Symptom: Sleep Deprivation and Dizziness, Severity: High, Score: 3, Context: Emergency",3
+S-17,Sleep,"Slept like a baby, feeling great today.",0,"That's wonderful to hear! A good night's sleep can make such a difference in how we feel throughout the day. Is there anything special you have planned for today? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: None, Score: 0, Context: Good sleep reported.",0
+S-18,Sleep,"A bit light on the sleep, but nothing a strong cup of tea won't fix.",1,"It's amazing how a good cup of tea can make a difference! Since you mentioned your sleep, how have you been feeling overall during the day? Any changes in your mood or energy levels? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: Low, Score: 1, Context: Light sleep but manageable with tea.",1
+S-19,Sleep,Very broken sleep. Probably only got about 4 hours altogether. Can't focus on anything.,2,"It sounds like you had a rough night. Lack of sleep can really make it hard to concentrate during the day. How are you feeling otherwise? Any changes in your mood or energy levels? 
+
+[SUMMARY] Symptom: Sleep Quality, Severity: Medium, Score: 2, Context: Broken sleep, only 4 hours.",2
+M-05,Mood,Had a lovely walk in the park. Feeling really positive about the week ahead.,0,"That sounds wonderful! It's great to hear you're feeling positive and enjoying some time outdoors. How has your sleep been lately? 
+
+[SUMMARY] Symptom: Psychological Mood, Severity: None, Score: 0, Context: Feeling positive and cheerful.",0
+M-06,Mood,"Feeling a tiny bit fed up with the rain, but otherwise I'm okay.",1,"Rainy days can sometimes dampen the mood a bit, can't they? It's good to hear you're doing okay otherwise. How has your sleep been lately? 
+
+[SUMMARY] Symptom: Mood, Severity: None, Score: 0, Context: Feeling okay despite the weather.",0
+M-07,Mood,Just feeling really isolated lately. My friends haven't visited and I don't see the point in doing my hobbies.,2,"It sounds like you're going through a tough time, and it's important to acknowledge those feelings. Sometimes, reaching out to someone or even engaging in a small activity can help shift the mood a bit. Have you noticed any changes in your sleep quality recently? 
+
+[SUMMARY] Symptom: Isolation, Severity: Medium, Score: 2, Context: Feeling isolated and disinterested in hobbies.",2
+M-08,Mood,"I just want to end it all. There is no hope left, I am just a burden to my family.",3,"I am an AI tracking assistant and cannot provide medical advice. Please contact your doctor or emergency services immediately. 
+
+[SUMMARY] Symptom: Psychological distress, Severity: High, Score: 3, Context: Emergency",3
+M-09,Mood,Really upbeat today! Managed to do some gardening.,0,"That's wonderful to hear! Gardening can be such a therapeutic activity. How did you find your mobility while working in the garden? Any stiffness or tremors, or did everything go smoothly? 
+
+[SUMMARY] Symptom: Mood, Severity: None, Score: 0, Context: Feeling upbeat and positive mood.",0
+M-10,Mood,"A little anxious about my upcoming doctor's appointment, but nothing major.",1,"It's understandable to feel a bit anxious before a doctor's appointment. It's great that it's not too overwhelming for you. Do you find that these feelings affect your sleep or daily activities at all? 
+
+[SUMMARY] Symptom: Anxiety, Severity: Low, Score: 1, Context: Pre-appointment nerves.",1
+M-11,Mood,Been crying on and off all morning. Everything just feels overwhelming and gray.,2,"It sounds like you're having a really tough day. It's important to acknowledge these feelings and know that you're not alone. Sometimes expressing what's on your mind can help lighten the load. How has your sleep been lately? 
+
+[SUMMARY] Symptom: Depression, Severity: Medium, Score: 2, Context: Overwhelming feelings and crying.",2
+M-12,Mood,Complete despair. I haven't left my bed in days and I refuse to eat. I just want to disappear.,3,"It sounds like you're going through an incredibly tough time, and it's important to reach out to someone who can provide support, like a mental health professional or a trusted person in your life. Please remember, you're not alone in this, and there are people who care about you and want to help.
+
+[SUMMARY] Symptom: Depression, Severity: High, Score: 3, Context: Refusal to eat and stay in bed.",3
+M-13,Mood,"Fantastic day, feeling totally at peace.",0,"That's wonderful to hear! It's great to have days where everything feels just right. How has your sleep been lately? 
+
+[SUMMARY] Symptom: Psychological Mood, Severity: None, Score: 0, Context: Feeling at peace.",0
+M-14,Mood,"Slightly frustrated I couldn't open the jam jar, but I laughed it off.",1,"It's great to hear you could find some humor in the situation! Sometimes those jars can be really tricky. Since you mentioned a bit of frustration with opening the jar, have you noticed any stiffness or difficulty with other tasks like dressing or eating lately? 
+
+[SUMMARY] Symptom: Difficulty with fine motor tasks, Severity: Low, Score: 1, Context: Frustration with opening a jar.",1
+M-15,Mood,Feeling very detached from everything. I don't enjoy watching my favorite shows anymore.,2,"It sounds like you're going through a tough time. It's important to acknowledge these feelings. Sometimes, changes in mood or interest can be part of the journey with Parkinson's. Have you noticed any changes in your sleep quality recently? 
+
+[SUMMARY] Symptom: Detachment/Anhedonia, Severity: Medium, Score: 2, Context: Loss of interest in favorite activities.",2
+M-16,Mood,I'm entirely consumed by darkness. I can't stop sobbing and I feel physically ill from the sadness.,3,"That sounds incredibly overwhelming, and it's important to acknowledge how you're feeling. I'm here to listen and support you. It might help to talk about how these feelings are affecting your daily life. Have you noticed any changes in your sleep patterns or appetite recently? 
+
+[SUMMARY] Symptom: Depression, Severity: High, Score: 3, Context: Consumed by sadness and physical illness from emotions.",3
+M-17,Mood,Feeling contented and happy. Good chat with the neighbors.,0,"It's wonderful to hear that you're feeling content and had a good chat with your neighbors. Social interactions can really lift our spirits. How has your sleep been lately? 
+
+[SUMMARY] Symptom: Mood, Severity: None, Score: 0, Context: Feeling contented and happy.",0
+M-18,Mood,"Just a bit grumpy this morning, but I'll get over it.",1,It's completely normal to have those days. Sometimes a little grumpiness can pass with a nice cup of tea or a walk outside. How did you sleep last night? Rest can often influence our mood.,Error
+M-19,Mood,Every day feels like a massive chore. I just sit in the chair staring at the wall.,2,"It sounds like you're having a tough time right now. It's important to acknowledge these feelings. How have you been sleeping lately? Sometimes our sleep can really impact how we feel during the day. 
+
+[SUMMARY] Symptom: Depression, Severity: Medium, Score: 2, Context: Feeling of daily tasks being overwhelming and lack of motivation.",2

@@ -6,20 +6,28 @@ from dotenv import load_dotenv
 import requests  
 import base64    
 
-# Load environment variables from .env file
+# ==========================================
+# 1. Environment & API Initialization
+# ==========================================
+# Load environment variables from the .env file
 load_dotenv()
 
-# Initialize OpenAI client
+# Initialize OpenAI client for LLM processing
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Retrieve Twilio and Supabase credentials
+# Retrieve Twilio and Supabase credentials for multimodal and database access
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH = os.getenv("TWILIO_AUTH_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_DB_URL")
 
+
+# ==========================================
+# 2. Multimodal Utility Functions
+# ==========================================
 def get_base64_image(url):
     """
     Downloads an image from a secured Twilio URL and converts it to a Base64 string.
+    This enables the vision-language model to process clinical uploads (e.g., MoCA tests).
     """
     try:
         print(f"Downloading image from Twilio: {url}")
@@ -37,7 +45,10 @@ def get_base64_image(url):
         print(f"❌ Error fetching image: {e}")
         return None
 
-# --- CORE AI PROMPT WITH MULTIMODAL CAPABILITIES ---
+
+# ==========================================
+# 3. Core LLM System Prompt (The "Brain")
+# ==========================================
 SYSTEM_PROMPT = """
 You are a proactive clinical assistant for Parkinson's Disease tracking.
 Your role is to support the patient OR their carer, and SUBTLY weave clinical assessments into daily conversation.
@@ -47,7 +58,7 @@ You are strictly a symptom tracking assistant, NOT a certified doctor.
 You CANNOT diagnose, prescribe, or recommend changes to medication dosages.
 If the user reports a severe medical emergency (e.g., falling, extreme pain, severe injury), you MUST do TWO things:
 1. Reply ONLY with a variation of: "I am an AI tracking assistant and cannot provide medical advice. Please contact your doctor or emergency services immediately." (DO NOT ask any follow-up clinical questions or make casual conversation in this situation).
-2. You MUST STILL output the [SUMMARY] tag at the very end with Severity: High (e.g., [SUMMARY] Symptom: Fall and Severe Pain, Severity: High, Context: Emergency). This is critical so the backend system can trigger the caregiver alert!
+2. You MUST STILL output the [SUMMARY] tag at the very end with Severity: High (e.g., [SUMMARY] Symptom: Fall and Severe Pain, Severity: High, Score: 3, Context: Emergency). This is critical so the backend system can trigger the caregiver alert!
 
 IDENTITY AWARENESS (PATIENT VS. CARER):
 - If they speak in the first person, address them warmly as the patient.
@@ -55,7 +66,7 @@ IDENTITY AWARENESS (PATIENT VS. CARER):
 
 CLINICAL ARSENAL:
 1. MDS-UPDRS (Motor): Ask about dressing, eating, tremors, freezing of gait, or stiffness.
-2. PDQ-39 (Psychological): Ask about feelings of depression, isolation, or embarrassment.
+2. PDQ-39 & Non-Motor: Ask about feelings of depression, sleep quality, isolation, or embarrassment.
 
 CONVERSATION RULES:
 1. Show natural, varied empathy. STRICTLY FORBIDDEN to repeatedly use phrases like "I'm sorry to hear that". 
@@ -64,9 +75,10 @@ CONVERSATION RULES:
 4. Keep it highly conversational, warm, and human-like.
 
 DATA EXTRACTION RULE (CONDITIONAL SUMMARY):
-- You MUST output the [SUMMARY] tag IMMEDIATELY if the user mentions any symptom OR explicitly states the absence/improvement of a symptom (e.g., "no shaking").
+- You MUST output the [SUMMARY] tag IMMEDIATELY if the user discusses their physical mobility, sleep quality, OR psychological mood.
+- CRITICAL: Even if the patient reports a POSITIVE or NORMAL state (e.g., "I slept perfectly", "I feel cheerful", "No tremors"), you MUST still extract this using Severity: None and Score: 0. Do not skip the summary.
 - Use the strict 0-3 MDS-UPDRS scoring system:
-  * 0 (None): Normal, absent, or no issue.
+  * 0 (None): Normal, absent, or no issue (e.g., good sleep, happy mood).
   * 1 (Low): Slight/mild, but does not interfere with daily activities.
   * 2 (Medium): Moderate, interferes with some activities.
   * 3 (High): Severe, causes loss of independence or function.
@@ -92,6 +104,10 @@ Provide brief, empathetic feedback to the user in the conversational text, and a
 Format: [MOCA] Score: <Score>/3, Context: <Brief evaluation details>
 """
 
+
+# ==========================================
+# 4. LLM Interface & Data Logging
+# ==========================================
 def get_ai_response(user_message, conversation_history, patient_id, image_url=None):
     """
     Generates the AI response, routing text and vision payloads appropriately, 
@@ -99,10 +115,12 @@ def get_ai_response(user_message, conversation_history, patient_id, image_url=No
     """
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     
+    # Inject conversational context (last 3 turns to maintain continuity)
     for turn in conversation_history[-3:]:
         messages.append({"role": "user", "content": turn["user"]})
         messages.append({"role": "assistant", "content": turn["ai"]})
         
+    # Handle optional image attachments (Vision Capabilities)
     if image_url:
         base64_image = get_base64_image(image_url)
         if base64_image:
@@ -118,6 +136,7 @@ def get_ai_response(user_message, conversation_history, patient_id, image_url=No
     messages.append({"role": "user", "content": user_content})
 
     try:
+        # Invoke OpenAI API
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
@@ -127,7 +146,7 @@ def get_ai_response(user_message, conversation_history, patient_id, image_url=No
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_message = user_message if user_message else "[User uploaded an image attachment]"
         
-        # Connecting to Cloud PostgreSQL ---
+        # Connecting to Cloud PostgreSQL (Supabase) to persist the interaction log
         conn = psycopg2.connect(SUPABASE_URL)
         c = conn.cursor()
         c.execute("INSERT INTO chat_history (patient_id, timestamp, user_message, response) VALUES (%s, %s, %s, %s)",
@@ -135,7 +154,7 @@ def get_ai_response(user_message, conversation_history, patient_id, image_url=No
         conn.commit()
         conn.close()
 
-        # 👇 UPGRADE: Print the raw AI output (including hidden tags) to the terminal for debugging and evaluation
+        # Print the raw AI output (including hidden clinical tags) to the terminal for debugging and evaluation
         print(f"\n🤖 [RAW AI OUTPUT FOR DEBUGGING]:\n{ai_response}\n")
 
         return ai_response
