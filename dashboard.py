@@ -6,6 +6,7 @@ import psycopg2
 from openai import OpenAI
 from dotenv import load_dotenv
 from fpdf import FPDF
+from clinical_utils import strip_internal_tags
 
 # =================================================================
 # 1. SYSTEM CONFIGURATION & ENVIRONMENT
@@ -114,6 +115,12 @@ try:
     # and immediately nukes the report cache to prevent IDM background sniffing.
     if "current_view_id" not in st.session_state:
         st.session_state.current_view_id = HOME_OPTION
+    if "ai_report" not in st.session_state:
+        st.session_state.ai_report = None
+    if "pdf_bytes" not in st.session_state:
+        st.session_state.pdf_bytes = None
+    if "pdf_ready" not in st.session_state:
+        st.session_state.pdf_ready = False
     
     # If the user navigates away, wipe all clinical report session data
     if st.session_state.current_view_id != selected_display_name:
@@ -195,13 +202,16 @@ try:
                     st.divider()
             
             # --- Feature: Regular Expression Data Extraction (MDS-UPDRS Scoring) ---
-            extracted_symp = df['response'].str.extract(r"\[SUMMARY\] Symptom: (.*?), Severity: (.*?)(?:, Score: \d+)?, Context: (.*)")
-            extracted_symp.columns = ['Symptom', 'Severity', 'Context']
+            extracted_symp = df['response'].str.extract(
+                r"\[SUMMARY\]\s*Symptom:\s*(.*?),\s*Severity:\s*(.*?)(?:,\s*Score:\s*(\d+))?,\s*Context:\s*(.*)"
+            )
+            extracted_symp.columns = ['Symptom', 'Severity', 'Score', 'Context']
             clinical_df = pd.concat([df, extracted_symp], axis=1).dropna(subset=['Symptom']).copy()
             
             # Mapping categorical severity to numerical weights for quantitative analysis
             severity_weights = {"None": 0, "Low": 1, "Medium": 2, "High": 3}
-            clinical_df['Severity_Score'] = clinical_df['Severity'].map(severity_weights)
+            clinical_df['Score'] = pd.to_numeric(clinical_df['Score'], errors='coerce')
+            clinical_df['Severity_Score'] = clinical_df['Score'].fillna(clinical_df['Severity'].map(severity_weights))
 
             # Extraction of Motor Fluctuation states (Hauser Diary)
             extracted_hauser = df['response'].str.extract(r"\[HAUSER\] State: (.*?), Context: (.*)")
@@ -381,8 +391,7 @@ try:
                 with st.chat_message("assistant", avatar="🤖"):
                     ai_text = str(row['response'])
                     # Cleaning internal tags before displaying to clinicians
-                    for tag in ["[SUMMARY]", "[PROFILE]", "[HAUSER]", "[MOCA]"]:
-                        if tag in ai_text: ai_text = ai_text.split(tag)[0].strip()
+                    ai_text = strip_internal_tags(ai_text)
                     st.write(f"**AI Assistant**: {ai_text}")
                 st.divider()
 

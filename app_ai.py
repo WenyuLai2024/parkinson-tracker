@@ -3,22 +3,26 @@ import psycopg2
 from datetime import datetime
 from openai import OpenAI
 from dotenv import load_dotenv
-import requests  
-import base64    
+import requests
+import base64
 
 # ==========================================
 # 1. Environment & API Initialization
 # ==========================================
-# Load environment variables from the .env file
 load_dotenv()
 
-# Initialize OpenAI client for LLM processing
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Retrieve Twilio and Supabase credentials for multimodal and database access
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH = os.getenv("TWILIO_AUTH_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_DB_URL")
+
+DB_CONNECT_TIMEOUT_SECONDS = int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "10"))
+MEDIA_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "20"))
+
+
+def get_db_connection():
+    return psycopg2.connect(SUPABASE_URL, connect_timeout=DB_CONNECT_TIMEOUT_SECONDS)
 
 
 # ==========================================
@@ -31,18 +35,22 @@ def get_base64_image(url):
     """
     try:
         print(f"Downloading image from Twilio: {url}")
-        response = requests.get(url, auth=(TWILIO_SID, TWILIO_AUTH))
-        
+        response = requests.get(
+            url,
+            auth=(TWILIO_SID, TWILIO_AUTH),
+            timeout=MEDIA_DOWNLOAD_TIMEOUT_SECONDS,
+        )
+
         if response.status_code == 200:
-            content_type = response.headers.get('Content-Type', 'image/jpeg')
-            base64_data = base64.b64encode(response.content).decode('utf-8')
-            print("✅ Image successfully downloaded and converted to Base64.")
+            content_type = response.headers.get("Content-Type", "image/jpeg")
+            base64_data = base64.b64encode(response.content).decode("utf-8")
+            print("Image successfully downloaded and converted to Base64.")
             return f"data:{content_type};base64,{base64_data}"
-        else:
-            print(f"❌ Failed to fetch image. Status Code: {response.status_code}")
-            return None
+
+        print(f"Failed to fetch image. Status Code: {response.status_code}")
+        return None
     except Exception as e:
-        print(f"❌ Error fetching image: {e}")
+        print(f"Error fetching image: {e}")
         return None
 
 
@@ -54,7 +62,7 @@ You are a proactive clinical assistant for Parkinson's Disease tracking.
 Your role is to support the patient OR their carer, and SUBTLY weave clinical assessments into daily conversation.
 
 SAFETY GUARDRAIL (CRITICAL & ABSOLUTE):
-You are strictly a symptom tracking assistant, NOT a certified doctor. 
+You are strictly a symptom tracking assistant, NOT a certified doctor.
 You CANNOT diagnose, prescribe, or recommend changes to medication dosages.
 If the user reports a severe medical emergency (e.g., falling, extreme pain, severe injury), you MUST do TWO things:
 1. Reply ONLY with a variation of: "I am an AI tracking assistant and cannot provide medical advice. Please contact your doctor or emergency services immediately." (DO NOT ask any follow-up clinical questions or make casual conversation in this situation).
@@ -69,7 +77,7 @@ CLINICAL ARSENAL:
 2. PDQ-39 & Non-Motor: Ask about feelings of depression, sleep quality, isolation, or embarrassment.
 
 CONVERSATION RULES:
-1. Show natural, varied empathy. STRICTLY FORBIDDEN to repeatedly use phrases like "I'm sorry to hear that". 
+1. Show natural, varied empathy. STRICTLY FORBIDDEN to repeatedly use phrases like "I'm sorry to hear that".
 2. Use active listening instead.
 3. Ask ONE simple question from the Clinical Arsenal above IF AND ONLY IF it is not a medical emergency.
 4. Keep it highly conversational, warm, and human-like.
@@ -108,57 +116,71 @@ Format: [MOCA] Score: <Score>/3, Context: <Brief evaluation details>
 # ==========================================
 # 4. LLM Interface & Data Logging
 # ==========================================
-def get_ai_response(user_message, conversation_history, patient_id, image_url=None):
+def get_ai_response(user_message, conversation_history, patient_id, image_url=None, persist_log=True):
     """
-    Generates the AI response, routing text and vision payloads appropriately, 
+    Generates the AI response, routing text and vision payloads appropriately,
     and logs the interaction to the cloud PostgreSQL database.
     """
+    safe_user_message = (user_message or "").strip()
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    
+
     # Inject conversational context (last 3 turns to maintain continuity)
     for turn in conversation_history[-3:]:
         messages.append({"role": "user", "content": turn["user"]})
         messages.append({"role": "assistant", "content": turn["ai"]})
-        
+
     # Handle optional image attachments (Vision Capabilities)
     if image_url:
         base64_image = get_base64_image(image_url)
         if base64_image:
             user_content = [
-                {"type": "text", "text": user_message if user_message else "Here is the image I drew for the assessment."},
-                {"type": "image_url", "image_url": {"url": base64_image}}
+                {
+                    "type": "text",
+                    "text": safe_user_message if safe_user_message else "Here is the image I drew for the assessment.",
+                },
+                {"type": "image_url", "image_url": {"url": base64_image}},
             ]
         else:
-            user_content = user_message + " [System Note: The patient uploaded an image, but the backend failed to download it.]"
+            fallback_message = safe_user_message if safe_user_message else "Patient uploaded an image."
+            user_content = (
+                f"{fallback_message} "
+                "[System Note: The patient uploaded an image, but the backend failed to download it.]"
+            )
     else:
-        user_content = user_message
+        user_content = safe_user_message or "Patient sent an empty message."
 
     messages.append({"role": "user", "content": user_content})
 
     try:
-        # Invoke OpenAI API
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
-            temperature=0.3 
+            temperature=0.3,
         )
         ai_response = response.choices[0].message.content
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_message = user_message if user_message else "[User uploaded an image attachment]"
-        
-        # Connecting to Cloud PostgreSQL (Supabase) to persist the interaction log
-        conn = psycopg2.connect(SUPABASE_URL)
-        c = conn.cursor()
-        c.execute("INSERT INTO chat_history (patient_id, timestamp, user_message, response) VALUES (%s, %s, %s, %s)",
-                  (patient_id, current_time, log_message, ai_response))
-        conn.commit()
-        conn.close()
-
-        # Print the raw AI output (including hidden clinical tags) to the terminal for debugging and evaluation
-        print(f"\n🤖 [RAW AI OUTPUT FOR DEBUGGING]:\n{ai_response}\n")
-
-        return ai_response
-        
     except Exception as e:
-        print(f"OpenAI / DB API Error: {e}")
+        print(f"OpenAI API Error: {e}")
         return "I'm having a little trouble connecting right now. Could you try sending that again?"
+
+    if persist_log:
+        log_message = safe_user_message if safe_user_message else "[User uploaded an image attachment]"
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as c:
+                    c.execute(
+                        """
+                        INSERT INTO chat_history (patient_id, timestamp, user_message, response)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        (patient_id, current_time, log_message, ai_response),
+                    )
+                conn.commit()
+        except Exception as db_error:
+            # Keep the interaction functional even when persistence fails.
+            print(f"DB Logging Error: {db_error}")
+
+    # Print the raw AI output (including hidden clinical tags) to the terminal for debugging and evaluation
+    print(f"\n[RAW AI OUTPUT FOR DEBUGGING]:\n{ai_response}\n")
+    return ai_response

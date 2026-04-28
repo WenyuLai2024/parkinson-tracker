@@ -1,5 +1,6 @@
 streamlit
 pandas
+numpy
 altair
 psycopg2-binary
 openai
@@ -10,3 +11,6 @@ gunicorn
 APScheduler
 requests
 fpdf
+matplotlib
+seaborn
+scikit-learn

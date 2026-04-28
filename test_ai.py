@@ -38,7 +38,7 @@ for index, row in df.iterrows():
     
     # Invoke the LLM endpoint (simulating a first-time interaction with empty context)
     # Using "AUTO_TESTER" as a mock patient_id to isolate test data in the cloud database
-    ai_response = get_ai_response(user_input, [], "AUTO_TESTER", None)
+    ai_response = get_ai_response(user_input, [], "AUTO_TESTER", None, persist_log=False)
     ai_predictions.append(ai_response)
     
     # Regex extraction: Isolate the numerical score from the structured [SUMMARY] tag
