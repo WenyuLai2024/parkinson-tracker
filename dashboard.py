@@ -48,15 +48,15 @@ def render_login_gate():
         submitted = st.form_submit_button("Sign in")
 
     if submitted:
-        hash_match = False
-        plaintext_match = False
         if DASHBOARD_PASSWORD_HASH:
+            # If hash is configured, only hash-based auth is accepted.
             computed_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
-            hash_match = hmac.compare_digest(computed_hash, DASHBOARD_PASSWORD_HASH)
-        if DASHBOARD_PASSWORD:
-            plaintext_match = hmac.compare_digest(password, DASHBOARD_PASSWORD)
+            password_ok = hmac.compare_digest(computed_hash, DASHBOARD_PASSWORD_HASH)
+        else:
+            # Plaintext fallback is only used when hash is not configured.
+            password_ok = bool(DASHBOARD_PASSWORD) and hmac.compare_digest(password, DASHBOARD_PASSWORD)
 
-        if username == DASHBOARD_USERNAME and (hash_match or plaintext_match):
+        if username == DASHBOARD_USERNAME and password_ok:
             st.session_state.dashboard_authenticated = True
             st.session_state.dashboard_auth_expiry = time.time() + (DASHBOARD_SESSION_TIMEOUT_MINUTES * 60)
             st.success("Login successful.")
@@ -84,6 +84,8 @@ else:
     )
 
 if st.session_state.dashboard_authenticated:
+    # Sliding session timeout: each valid interaction extends the session window.
+    st.session_state.dashboard_auth_expiry = time.time() + (DASHBOARD_SESSION_TIMEOUT_MINUTES * 60)
     if st.sidebar.button("Log out"):
         st.session_state.dashboard_authenticated = False
         st.session_state.dashboard_auth_expiry = 0.0
@@ -256,25 +258,41 @@ try:
             st.markdown(f"### Clinician Portal: Electronic Health Record (EHR)")
             
             # --- Feature: Patient Demographics Header ---
+            patient_profile = pd.DataFrame()
             if not profiles_df.empty:
                 patient_profile = profiles_df[profiles_df['patient_id'] == selected_patient_raw]
-                if not patient_profile.empty:
-                    profile_data = patient_profile.iloc[0]
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.caption("Name (Masked)")
-                        display_name = profile_data['name'].split()[0] if profile_data['name'] != "Unknown" else "Unknown"
-                        st.info(f"**{display_name} ***")
-                    with col2:
-                        st.caption("Demographics")
-                        st.info(f"**{profile_data['age']} yrs / {profile_data['gender']}**")
-                    with col3:
-                        st.caption("Time since Diagnosis")
-                        st.info(f"**{profile_data['years_diagnosed']} Years**")
-                    with col4:
-                        st.caption("Current Medication")
-                        st.info(f"**{profile_data['current_medication']}**")
-                    st.divider()
+
+            if not patient_profile.empty:
+                profile_data = patient_profile.iloc[0]
+                display_name = profile_data.get("name", "Unknown")
+                age_val = profile_data.get("age", "Unknown")
+                gender_val = profile_data.get("gender", "Unknown")
+                years_val = profile_data.get("years_diagnosed", "Unknown")
+                med_val = profile_data.get("current_medication", "Unknown")
+            else:
+                display_name = "Unknown"
+                age_val = "Unknown"
+                gender_val = "Unknown"
+                years_val = "Unknown"
+                med_val = "Unknown"
+
+            if isinstance(display_name, str) and display_name != "Unknown":
+                display_name = display_name.split()[0]
+
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.caption("Name (Masked)")
+                st.info(f"**{display_name} ***")
+            with col2:
+                st.caption("Demographics")
+                st.info(f"**{age_val} yrs / {gender_val}**" if age_val != "Unknown" else "**Unknown**")
+            with col3:
+                st.caption("Time since Diagnosis")
+                st.info(f"**{years_val} Years**" if years_val != "Unknown" else "**Unknown**")
+            with col4:
+                st.caption("Current Medication")
+                st.info(f"**{med_val}**")
+            st.divider()
             
             # --- Feature: Regular Expression Data Extraction (MDS-UPDRS Scoring) ---
             extracted_symp = df['response'].str.extract(
