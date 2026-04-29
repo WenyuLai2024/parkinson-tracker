@@ -2,6 +2,10 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 import os
+import time
+import math
+import hmac
+import hashlib
 import psycopg2
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -15,9 +19,15 @@ from clinical_utils import strip_internal_tags
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 SUPABASE_URL = os.getenv("SUPABASE_DB_URL")
+DASHBOARD_USERNAME = os.getenv("DASHBOARD_USERNAME", "").strip()
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "").strip()
+DASHBOARD_PASSWORD_HASH = os.getenv("DASHBOARD_PASSWORD_HASH", "").strip().lower()
+DASHBOARD_SESSION_TIMEOUT_MINUTES = int(os.getenv("DASHBOARD_SESSION_TIMEOUT_MINUTES", "60"))
+DASHBOARD_LOOKBACK_DAYS = int(os.getenv("DASHBOARD_LOOKBACK_DAYS", "365"))
+DASHBOARD_HISTORY_LIMIT = int(os.getenv("DASHBOARD_HISTORY_LIMIT", "5000"))
 
 # Define the global UI architecture of the dashboard
-st.set_page_config(page_title="Clinician Dashboard", layout="wide", page_icon="⚕️")
+st.set_page_config(page_title="Clinician Dashboard", layout="wide", page_icon="C")
 
 # Injection of custom CSS to fix dropdown UX and pointer behavior
 st.markdown(
@@ -29,6 +39,56 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
+
+def render_login_gate():
+    st.title("Clinician Dashboard Login")
+    with st.form("login_form", clear_on_submit=False):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Sign in")
+
+    if submitted:
+        hash_match = False
+        plaintext_match = False
+        if DASHBOARD_PASSWORD_HASH:
+            computed_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+            hash_match = hmac.compare_digest(computed_hash, DASHBOARD_PASSWORD_HASH)
+        if DASHBOARD_PASSWORD:
+            plaintext_match = hmac.compare_digest(password, DASHBOARD_PASSWORD)
+
+        if username == DASHBOARD_USERNAME and (hash_match or plaintext_match):
+            st.session_state.dashboard_authenticated = True
+            st.session_state.dashboard_auth_expiry = time.time() + (DASHBOARD_SESSION_TIMEOUT_MINUTES * 60)
+            st.success("Login successful.")
+            st.rerun()
+        st.error("Invalid credentials.")
+    st.stop()
+
+
+if "dashboard_authenticated" not in st.session_state:
+    st.session_state.dashboard_authenticated = False
+if "dashboard_auth_expiry" not in st.session_state:
+    st.session_state.dashboard_auth_expiry = 0.0
+
+if st.session_state.dashboard_authenticated and time.time() > st.session_state.dashboard_auth_expiry:
+    st.session_state.dashboard_authenticated = False
+    st.session_state.dashboard_auth_expiry = 0.0
+    st.warning("Session expired. Please sign in again.")
+
+if DASHBOARD_USERNAME and (DASHBOARD_PASSWORD or DASHBOARD_PASSWORD_HASH):
+    if not st.session_state.dashboard_authenticated:
+        render_login_gate()
+else:
+    st.sidebar.warning(
+        "Auth disabled. Set DASHBOARD_USERNAME and either DASHBOARD_PASSWORD or DASHBOARD_PASSWORD_HASH in .env."
+    )
+
+if st.session_state.dashboard_authenticated:
+    if st.sidebar.button("Log out"):
+        st.session_state.dashboard_authenticated = False
+        st.session_state.dashboard_auth_expiry = 0.0
+        st.rerun()
+
 try:
     # =================================================================
     # 2. DATA INGESTION (CLOUD POSTGRESQL & SYNTHETIC BASELINE)
@@ -37,8 +97,20 @@ try:
     conn = psycopg2.connect(SUPABASE_URL)
     cur = conn.cursor()
     
-    # 2.1 Retrieve the full longitudinal chat history
-    cur.execute("SELECT * FROM chat_history")
+    # 2.1 Retrieve scoped longitudinal chat history (bounded lookback + cap)
+    cutoff_time = (
+        pd.Timestamp.utcnow() - pd.Timedelta(days=DASHBOARD_LOOKBACK_DAYS)
+    ).to_pydatetime().replace(tzinfo=None)
+    cur.execute(
+        """
+        SELECT *
+        FROM chat_history
+        WHERE timestamp >= %s
+        ORDER BY timestamp DESC
+        LIMIT %s
+        """,
+        (cutoff_time, DASHBOARD_HISTORY_LIMIT),
+    )
     history_rows = cur.fetchall()
     if history_rows:
         history_cols = [desc[0] for desc in cur.description]
@@ -78,6 +150,9 @@ try:
     # 3. GLOBAL NAVIGATION & IDENTITY ANONYMIZATION
     # =================================================================
     st.sidebar.header("Global Navigation")
+    st.sidebar.caption(
+        f"Data scope: last {DASHBOARD_LOOKBACK_DAYS} days, capped at {DASHBOARD_HISTORY_LIMIT} records."
+    )
     
     # Extract unique patient identifiers for the navigation menu
     raw_patient_list = raw_df['patient_id'].unique().tolist() if not raw_df.empty else []
@@ -134,8 +209,8 @@ try:
     # =================================================================
     if selected_display_name == HOME_OPTION:
         st.sidebar.info("Data Privacy Mode: Patient identifiers are masked to comply with healthcare regulations.")
-        st.markdown("## 🏥 Welcome to the Clinical Decision Support System")
-        st.info("👈 Please select a patient from the sidebar to view their individual Electronic Health Record (EHR).")
+        st.markdown("## Welcome to the Clinical Decision Support System")
+        st.info("Please select a patient from the sidebar to view their individual Electronic Health Record (EHR).")
         st.divider()
         st.subheader("System Overview Metrics")
         
@@ -165,17 +240,17 @@ try:
         df = raw_df[raw_df['patient_id'] == selected_patient_raw].copy()
 
         # Sidebar Indexing for navigation within the EHR
-        st.sidebar.subheader("📌 Page Contents")
+        st.sidebar.subheader("Page Contents")
         st.sidebar.markdown("""
-        * [🟢 Hauser Diary (Motor)](#hauser)
-        * [🧠 MoCA Trend (Cognitive)](#moca)
-        * [📈 Symptom Logs & Trend](#symptoms)
-        * [🤖 AI Summary & Export](#report)
+        * [Hauser Diary (Motor)](#hauser)
+        * [MoCA Trend (Cognitive)](#moca)
+        * [Symptom Logs & Trend](#symptoms)
+        * [AI Summary & Export](#report)
         """)
         st.sidebar.markdown("---")
         st.sidebar.caption("Data Privacy Mode Active.")
 
-        tab1, tab2 = st.tabs(["📊 Clinical Dashboard", "💬 Raw Chat Transcript"])
+        tab1, tab2 = st.tabs(["Clinical Dashboard", "Raw Chat Transcript"])
         
         with tab1:
             st.markdown(f"### Clinician Portal: Electronic Health Record (EHR)")
@@ -306,7 +381,7 @@ try:
                         final_chart = line_chart.interactive()
 
                     st.altair_chart(final_chart, use_container_width=True)
-                    st.caption("🔵 **Solid Blue:** Patient Data | 🔴 **Dashed Red:** PPMI Synthetic Cohort Baseline")
+                    st.caption("Solid Blue: Patient Data | Dashed Red: PPMI Synthetic Cohort Baseline")
                     st.markdown("*Clinical Validation Note: The red dashed line represents the progression baseline derived from the Parkinson's Progression Markers Initiative (PPMI) cohort.*")
                 else:
                     st.warning("Insufficient data to generate trend analysis.")
@@ -373,30 +448,142 @@ try:
                 if st.session_state.pdf_ready and st.session_state.pdf_bytes:
                     st.success("Clinical report finalized and ready for download.")
                     st.download_button(
-                        label="📥 Download Clinical PDF Report",
+                        label="Download Clinical PDF Report",
                         data=st.session_state.pdf_bytes,
                         file_name=f"Report_{selected_patient_raw}.pdf",
                         mime="application/pdf"
                     )
-
         # --- TAB 2: Raw Conversation Transcript Archive ---
         with tab2:
             st.markdown(f"### Historical Interaction Archive: {selected_display_name}")
             chat_name = profile_dict.get(selected_patient_raw, "Unknown").split()[0] + " (Patient/Carer)" if selected_patient_raw in profile_dict and profile_dict[selected_patient_raw] != "Unknown" else "Unknown Patient"
-            
-            for index, row in df.iterrows():
-                with st.chat_message("user", avatar="👤"): 
-                    st.write(f"**{chat_name}** ({row['timestamp']}): {row['user_message']}")
-                
-                with st.chat_message("assistant", avatar="🤖"):
-                    ai_text = str(row['response'])
-                    # Cleaning internal tags before displaying to clinicians
-                    ai_text = strip_internal_tags(ai_text)
-                    st.write(f"**AI Assistant**: {ai_text}")
-                st.divider()
+
+            if df.empty:
+                st.info("No conversation history found for this patient yet.")
+            else:
+                transcript_df = df.copy()
+                transcript_df["timestamp"] = pd.to_datetime(transcript_df["timestamp"], errors="coerce")
+                transcript_df = transcript_df.dropna(subset=["timestamp"]).sort_values(
+                    "timestamp", ascending=False
+                ).reset_index(drop=True)
+
+                if transcript_df.empty:
+                    st.info("No valid timestamped messages found for this patient.")
+                else:
+                    min_date = transcript_df["timestamp"].min().date()
+                    max_date = transcript_df["timestamp"].max().date()
+
+                    filter_col1, filter_col2, filter_col3 = st.columns([2, 1, 1.2])
+                    with filter_col1:
+                        date_range = st.date_input(
+                            "Filter by date range",
+                            value=(min_date, max_date),
+                            min_value=min_date,
+                            max_value=max_date,
+                            key=f"transcript_date_range_{selected_patient_raw}",
+                        )
+                    with filter_col2:
+                        page_size = st.selectbox(
+                            "Rows per page",
+                            options=[10, 20, 50],
+                            index=0,
+                            key=f"transcript_page_size_{selected_patient_raw}",
+                        )
+
+                    if isinstance(date_range, tuple):
+                        if len(date_range) == 2:
+                            start_date, end_date = date_range
+                        elif len(date_range) == 1:
+                            start_date = end_date = date_range[0]
+                        else:
+                            start_date, end_date = min_date, max_date
+                    else:
+                        start_date = end_date = date_range
+
+                    if start_date > end_date:
+                        start_date, end_date = end_date, start_date
+
+                    start_ts = pd.Timestamp(start_date)
+                    end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+                    filtered_df = transcript_df[
+                        (transcript_df["timestamp"] >= start_ts) & (transcript_df["timestamp"] <= end_ts)
+                    ].reset_index(drop=True)
+
+                    total_rows = len(filtered_df)
+                    with filter_col3:
+                        st.metric("Filtered records", total_rows)
+
+                    if total_rows == 0:
+                        st.info("No messages in the selected date range.")
+                    else:
+                        page_key = f"transcript_page_{selected_patient_raw}"
+                        filter_sig_key = f"transcript_filter_signature_{selected_patient_raw}"
+                        filter_signature = f"{start_date}_{end_date}_{page_size}"
+
+                        if page_key not in st.session_state:
+                            st.session_state[page_key] = 1
+                        if filter_sig_key not in st.session_state:
+                            st.session_state[filter_sig_key] = filter_signature
+                        elif st.session_state[filter_sig_key] != filter_signature:
+                            st.session_state[filter_sig_key] = filter_signature
+                            st.session_state[page_key] = 1
+
+                        total_pages = max(1, math.ceil(total_rows / page_size))
+                        st.session_state[page_key] = min(max(1, st.session_state[page_key]), total_pages)
+
+                        nav_col1, nav_col2, nav_col3 = st.columns([1, 1, 2])
+                        with nav_col1:
+                            if st.button(
+                                "Previous page",
+                                key=f"transcript_prev_{selected_patient_raw}",
+                                disabled=st.session_state[page_key] <= 1,
+                            ):
+                                st.session_state[page_key] -= 1
+                                st.rerun()
+                        with nav_col2:
+                            if st.button(
+                                "Next page",
+                                key=f"transcript_next_{selected_patient_raw}",
+                                disabled=st.session_state[page_key] >= total_pages,
+                            ):
+                                st.session_state[page_key] += 1
+                                st.rerun()
+                        with nav_col3:
+                            selected_page = st.number_input(
+                                "Page",
+                                min_value=1,
+                                max_value=total_pages,
+                                value=int(st.session_state[page_key]),
+                                step=1,
+                                key=f"transcript_page_input_{selected_patient_raw}",
+                            )
+                            if selected_page != st.session_state[page_key]:
+                                st.session_state[page_key] = int(selected_page)
+                                st.rerun()
+
+                        current_page = int(st.session_state[page_key])
+                        start_idx = (current_page - 1) * page_size
+                        end_idx = min(start_idx + page_size, total_rows)
+                        page_df = filtered_df.iloc[start_idx:end_idx]
+
+                        st.caption(
+                            f"Showing records {start_idx + 1}-{end_idx} of {total_rows} | Page {current_page}/{total_pages}"
+                        )
+
+                        for _, row in page_df.iterrows():
+                            with st.chat_message("user"):
+                                st.write(f"**{chat_name}** ({row['timestamp']}): {row['user_message']}")
+
+                            with st.chat_message("assistant"):
+                                ai_text = str(row["response"])
+                                # Cleaning internal tags before displaying to clinicians
+                                ai_text = strip_internal_tags(ai_text)
+                                st.write(f"**AI Assistant**: {ai_text}")
+                            st.divider()
 
 # Global exception handling for database or system critical errors
 except psycopg2.Error as e:
     st.error(f"Database Connection Error: {e}")
 except Exception as e:
     st.error(f"System Critical Error: {e}")
+

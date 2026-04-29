@@ -45,24 +45,55 @@ This project is a cloud-native Parkinson's symptom tracking assistant:
 - `TWILIO_ACCOUNT_SID`
 - `TWILIO_AUTH_TOKEN`
 - `TWILIO_PHONE_NUMBER`
+- `TWILIO_WEBHOOK_URL` (recommended for strict signature validation)
 - `SUPABASE_DB_URL`
 - `CAREGIVER_PHONE_NUMBER`
+- `DASHBOARD_USERNAME` (recommended for dashboard access control)
+- `DASHBOARD_PASSWORD` or `DASHBOARD_PASSWORD_HASH` (recommended for dashboard access control)
 
 Optional runtime controls:
 - `DB_CONNECT_TIMEOUT_SECONDS` (default: `10`)
 - `MEDIA_DOWNLOAD_TIMEOUT_SECONDS` (default: `20`)
 - `PROACTIVE_INTERVAL_MINUTES` (default: `60`)
+- `PROACTIVE_CHECKIN_TIMEZONE` (default: `Europe/London`)
 - `CAREGIVER_CONTEXT_LOG_LIMIT` (default: `10`)
 - `ENABLE_PROACTIVE_CHECKIN` (default: `true`)
+- `ENABLE_TWILIO_SIGNATURE_VALIDATION` (default: `true`)
+- `DIALOGUE_CONTEXT_TURNS` (default: `3`)
+- `SCHEDULER_REQUIRE_LEADER_LOCK` (default: `true`)
+- `SCHEDULER_LEADER_PORT` (default: `47200`)
+- `DASHBOARD_SESSION_TIMEOUT_MINUTES` (default: `60`)
+- `DASHBOARD_LOOKBACK_DAYS` (default: `365`)
+- `DASHBOARD_HISTORY_LIMIT` (default: `5000`)
 
 ## Run Locally
 ```bash
 pip install -r requirements.txt
 python app.py
-streamlit run dashboard.py
+python -m streamlit run dashboard.py
 ```
 
 ## Notes for Dissertation
 - `test_ai.py` + `test_dataset.csv` provide evaluation workflow for extraction accuracy.
 - `generate_ppmi_baseline.py` creates a synthetic cohort baseline for trend comparison.
-- `simulate_data_cloud.py` is destructive (clears DB tables) and should only be used in test environments.
+- `simulate_data_cloud.py` can be destructive. Use one of:
+  - `python simulate_data_cloud.py --confirm-reset` (clear and reseed)
+  - `python simulate_data_cloud.py --skip-reset` (append only)
+- Webhook security is enforced through Twilio request signature validation.
+- Proactive scheduler has a single-process leader lock to avoid duplicate dispatch in multi-worker deployments.
+- Conversation context is pulled from cloud DB, so context survives process restarts.
+
+## Quick Validation
+```bash
+# 1) Basic compile check
+python -m compileall app.py app_ai.py dashboard.py clinical_utils.py test_ai.py
+
+# 2) Run backend
+python app.py
+
+# 3) Run dashboard
+python -m streamlit run dashboard.py
+
+# 4) Run extraction evaluation
+python test_ai.py
+```

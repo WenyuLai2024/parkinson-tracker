@@ -1,15 +1,17 @@
 import os
 import re
+import socket
 import uuid
 import datetime
-from collections import defaultdict
+from zoneinfo import ZoneInfo
 
 import psycopg2
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
-from flask import Flask, request
+from flask import Flask, abort, request
 from openai import OpenAI
+from twilio.request_validator import RequestValidator
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 
@@ -30,6 +32,7 @@ app = Flask(__name__)
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+TWILIO_WEBHOOK_URL = os.getenv("TWILIO_WEBHOOK_URL", "").strip()
 SUPABASE_URL = os.getenv("SUPABASE_DB_URL")
 CAREGIVER_NUMBER = os.getenv("CAREGIVER_PHONE_NUMBER")
 
@@ -37,14 +40,23 @@ DB_CONNECT_TIMEOUT_SECONDS = int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "10"))
 MEDIA_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "20"))
 PROACTIVE_INTERVAL_MINUTES = int(os.getenv("PROACTIVE_INTERVAL_MINUTES", "60"))
 CAREGIVER_CONTEXT_LOG_LIMIT = int(os.getenv("CAREGIVER_CONTEXT_LOG_LIMIT", "10"))
+PROACTIVE_CHECKIN_TIMEZONE = os.getenv("PROACTIVE_CHECKIN_TIMEZONE", "Europe/London")
+DIALOGUE_CONTEXT_TURNS = int(os.getenv("DIALOGUE_CONTEXT_TURNS", "3"))
+
 ENABLE_PROACTIVE_CHECKIN = os.getenv("ENABLE_PROACTIVE_CHECKIN", "true").lower() == "true"
+ENABLE_TWILIO_SIGNATURE_VALIDATION = (
+    os.getenv("ENABLE_TWILIO_SIGNATURE_VALIDATION", "true").lower() == "true"
+)
+SCHEDULER_REQUIRE_LEADER_LOCK = os.getenv("SCHEDULER_REQUIRE_LEADER_LOCK", "true").lower() == "true"
+SCHEDULER_LEADER_PORT = int(os.getenv("SCHEDULER_LEADER_PORT", "47200"))
 
 # Initialize Twilio and OpenAI client instances
 twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+twilio_request_validator = RequestValidator(TWILIO_AUTH) if TWILIO_AUTH else None
 
-# In-memory conversation history (maintains session context per patient)
-conversation_history = defaultdict(list)
+scheduler = None
+scheduler_lock_socket = None
 
 
 # =================================================================
@@ -85,6 +97,144 @@ def get_linked_patient_ids_for_caregiver(caregiver_sender):
     return sorted(set(linked_ids))
 
 
+def get_recent_conversation_history(patient_id, max_turns=DIALOGUE_CONTEXT_TURNS):
+    """Load recent user/assistant turns from DB instead of in-memory cache."""
+    normalized = normalize_whatsapp_number(patient_id)
+    if not normalized:
+        return []
+
+    lookup_ids = [normalized, normalized.replace("whatsapp:", "", 1)]
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT user_message, response
+                    FROM chat_history
+                    WHERE patient_id = ANY(%s)
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                    """,
+                    (lookup_ids, max_turns),
+                )
+                rows = cur.fetchall()
+    except Exception as e:
+        print(f"Conversation history lookup failed: {e}")
+        return []
+
+    rows.reverse()
+    history = []
+    for user_message, response in rows:
+        history.append(
+            {
+                "user": str(user_message or ""),
+                "ai": str(response or ""),
+            }
+        )
+    return history
+
+
+def get_checkin_time():
+    """Return current datetime for proactive check-ins in configured timezone."""
+    try:
+        return datetime.datetime.now(ZoneInfo(PROACTIVE_CHECKIN_TIMEZONE))
+    except Exception:
+        print(
+            f"Invalid PROACTIVE_CHECKIN_TIMEZONE '{PROACTIVE_CHECKIN_TIMEZONE}', "
+            "using server local time."
+        )
+        return datetime.datetime.now()
+
+
+def build_proactive_checkin_message(now_dt):
+    hour = now_dt.hour
+    if 5 <= hour < 12:
+        daypart = "this morning"
+    elif 12 <= hour < 17:
+        daypart = "this afternoon"
+    elif 17 <= hour < 22:
+        daypart = "this evening"
+    else:
+        daypart = "today"
+
+    return (
+        "Hi there! It's your AI clinical assistant. "
+        f"Just checking in on your mobility {daypart}. "
+        "How is your medication working right now? Are you feeling any stiffness (OFF) "
+        "or involuntary movements (Dyskinesia)?"
+    )
+
+
+def acquire_scheduler_leader_lock():
+    """
+    Ensure only one process starts APScheduler on this host.
+    Uses a local TCP bind lock (single-host only).
+    """
+    global scheduler_lock_socket
+
+    if not SCHEDULER_REQUIRE_LEADER_LOCK:
+        return True
+
+    lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        lock_socket.bind(("127.0.0.1", SCHEDULER_LEADER_PORT))
+        lock_socket.listen(1)
+        scheduler_lock_socket = lock_socket
+        print(f"Scheduler leader lock acquired on 127.0.0.1:{SCHEDULER_LEADER_PORT}")
+        return True
+    except OSError:
+        print(
+            "Scheduler leader lock not acquired. "
+            "Another worker likely owns scheduler execution."
+        )
+        lock_socket.close()
+        return False
+
+
+def release_scheduler_leader_lock():
+    global scheduler_lock_socket
+    if scheduler_lock_socket:
+        scheduler_lock_socket.close()
+        scheduler_lock_socket = None
+
+
+def get_signature_validation_url():
+    """Build URL used for Twilio signature validation."""
+    if TWILIO_WEBHOOK_URL:
+        return TWILIO_WEBHOOK_URL
+
+    scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
+    host = request.headers.get("X-Forwarded-Host", request.host)
+    path = request.path
+    query = request.query_string.decode("utf-8") if request.query_string else ""
+    return f"{scheme}://{host}{path}" + (f"?{query}" if query else "")
+
+
+def validate_twilio_signature_or_abort():
+    if not ENABLE_TWILIO_SIGNATURE_VALIDATION:
+        return
+
+    if not twilio_request_validator:
+        print("Twilio signature validation is enabled but TWILIO_AUTH_TOKEN is missing.")
+        abort(500)
+
+    twilio_signature = request.headers.get("X-Twilio-Signature", "")
+    if not twilio_signature:
+        print("Missing X-Twilio-Signature header.")
+        abort(403)
+
+    validation_url = get_signature_validation_url()
+    try:
+        valid = twilio_request_validator.validate(validation_url, request.form, twilio_signature)
+    except Exception as e:
+        print(f"Twilio signature validation error: {e}")
+        abort(403)
+
+    if not valid:
+        print("Twilio signature mismatch. Request rejected.")
+        abort(403)
+
+
 # =================================================================
 # 3. Infrastructure Resilience: Anti-Sleep Mechanism
 # =================================================================
@@ -108,7 +258,11 @@ def proactive_clinical_checkin():
     Executes scheduled proactive clinical inquiries.
     Queries active patients and dispatches a standardized neurological assessment prompt.
     """
-    print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] Executing Proactive EMA Check-in...")
+    checkin_time = get_checkin_time()
+    print(
+        f"\n[{checkin_time.strftime('%Y-%m-%d %H:%M:%S')}] "
+        f"Executing Proactive EMA Check-in (TZ: {PROACTIVE_CHECKIN_TIMEZONE})..."
+    )
 
     try:
         active_patient_ids = set()
@@ -135,12 +289,7 @@ def proactive_clinical_checkin():
             print("No active cohorts found for proactive dispatch.")
             return
 
-        checkin_message = (
-            "Hi there! It's your AI clinical assistant. "
-            "Just checking in on your mobility this afternoon. "
-            "How is your medication working right now? Are you feeling any stiffness (OFF) "
-            "or involuntary movements (Dyskinesia)?"
-        )
+        checkin_message = build_proactive_checkin_message(checkin_time)
 
         for patient_phone in sorted(set(patients)):
             try:
@@ -150,10 +299,6 @@ def proactive_clinical_checkin():
                     to=patient_phone,
                 )
                 print(f"Proactive EMA dispatched to {patient_phone} (SID: {msg.sid})")
-
-                conversation_history[patient_phone].append(
-                    {"user": "[System Proactive Trigger]", "ai": checkin_message}
-                )
             except Exception as inner_e:
                 print(f"Failed to dispatch proactive message to {patient_phone}: {inner_e}")
 
@@ -161,18 +306,20 @@ def proactive_clinical_checkin():
         print(f"Database transaction error during proactive check-in: {e}")
 
 
-scheduler = None
 if ENABLE_PROACTIVE_CHECKIN:
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(
-        proactive_clinical_checkin,
-        "interval",
-        minutes=PROACTIVE_INTERVAL_MINUTES,
-        id="proactive_clinical_checkin",
-        replace_existing=True,
-    )
-    scheduler.start()
-    print(f"Scheduler started: proactive check-in every {PROACTIVE_INTERVAL_MINUTES} minutes")
+    if acquire_scheduler_leader_lock():
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(
+            proactive_clinical_checkin,
+            "interval",
+            minutes=PROACTIVE_INTERVAL_MINUTES,
+            id="proactive_clinical_checkin",
+            replace_existing=True,
+        )
+        scheduler.start()
+        print(f"Scheduler started: proactive check-in every {PROACTIVE_INTERVAL_MINUTES} minutes")
+    else:
+        print("Scheduler start skipped in this process.")
 else:
     print("Scheduler disabled via ENABLE_PROACTIVE_CHECKIN=false")
 
@@ -188,6 +335,8 @@ def sms_reply():
     - caregiver read-only summary
     - patient write-enabled clinical ingestion
     """
+    validate_twilio_signature_or_abort()
+
     sender_number = request.values.get("From", "")
     msg_received = request.values.get("Body", "").strip()
     num_media = int(request.values.get("NumMedia", 0))
@@ -313,9 +462,10 @@ def sms_reply():
     print(f"\n--- Inbound Patient Telemetry from {sender_number} ---")
     print(f"[Payload]: '{msg_received}'")
 
+    conversation_context = get_recent_conversation_history(sender_number, max_turns=DIALOGUE_CONTEXT_TURNS)
     full_ai_response = get_ai_response(
         msg_received,
-        conversation_history[sender_number],
+        conversation_context,
         sender_number,
         image_url,
     )
@@ -368,12 +518,6 @@ def sms_reply():
             except Exception as e:
                 print(f"Emergency alert transmission failed: {e}")
 
-    history_msg = msg_received if msg_received else "[Uploaded Visual Artifact]"
-    conversation_history[sender_number].append({"user": history_msg, "ai": full_ai_response})
-
-    if len(conversation_history[sender_number]) > 5:
-        conversation_history[sender_number].pop(0)
-
     display_response = strip_internal_tags(full_ai_response)
     if not display_response:
         display_response = "Thanks, I have logged your update."
@@ -391,3 +535,4 @@ if __name__ == "__main__":
     except (KeyboardInterrupt, SystemExit):
         if scheduler:
             scheduler.shutdown()
+        release_scheduler_leader_lock()
