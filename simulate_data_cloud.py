@@ -93,7 +93,7 @@ try:
                 patient_1,
                 time_m,
                 "I just had my morning medication and breakfast. Walking is easy right now.",
-                "That's great news! Enjoy your morning mobility.\n[HAUSER] State: ON, Context: Post-medication mobility\n[SUMMARY] Symptom: Normal mobility, Severity: Low, Score: 1, Context: Morning routine",
+                "That's great news! Enjoy your morning mobility.\n[HAUSER] State: ON, Context: Post-medication mobility\n[SUMMARY] Symptom: Normal mobility, Severity: None, Score: 0, Context: Morning routine",
             ),
         )
 

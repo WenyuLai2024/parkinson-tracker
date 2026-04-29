@@ -35,6 +35,7 @@ TWILIO_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 TWILIO_WEBHOOK_URL = os.getenv("TWILIO_WEBHOOK_URL", "").strip()
 SUPABASE_URL = os.getenv("SUPABASE_DB_URL")
 CAREGIVER_NUMBER = os.getenv("CAREGIVER_PHONE_NUMBER")
+DASHBOARD_PUBLIC_URL = os.getenv("DASHBOARD_PUBLIC_URL", "").strip()
 
 DB_CONNECT_TIMEOUT_SECONDS = int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "10"))
 MEDIA_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "20"))
@@ -49,6 +50,8 @@ ENABLE_TWILIO_SIGNATURE_VALIDATION = (
 )
 SCHEDULER_REQUIRE_LEADER_LOCK = os.getenv("SCHEDULER_REQUIRE_LEADER_LOCK", "true").lower() == "true"
 SCHEDULER_LEADER_PORT = int(os.getenv("SCHEDULER_LEADER_PORT", "47200"))
+FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+FLASK_PORT = int(os.getenv("PORT", "5000"))
 
 # Initialize Twilio and OpenAI client instances
 twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
@@ -261,7 +264,7 @@ def proactive_clinical_checkin():
     checkin_time = get_checkin_time()
     print(
         f"\n[{checkin_time.strftime('%Y-%m-%d %H:%M:%S')}] "
-        f"Executing Proactive EMA Check-in (TZ: {PROACTIVE_CHECKIN_TIMEZONE})..."
+        f"Executing Proactive EMA Check-in (TZ: {PROACTIVE_CHECKIN_TIMEZONE}, hour={checkin_time.hour})..."
     )
 
     try:
@@ -290,6 +293,7 @@ def proactive_clinical_checkin():
             return
 
         checkin_message = build_proactive_checkin_message(checkin_time)
+        print(f"Proactive check-in prompt: {checkin_message}")
 
         for patient_phone in sorted(set(patients)):
             try:
@@ -505,9 +509,10 @@ def sms_reply():
                 "[SYSTEM EMERGENCY ALERT]\n"
                 f"Warning: {patient_name} ({sender_number}) has recently reported severe symptoms "
                 "(e.g., critical stiffness or severe cognitive deviation).\n"
-                "Please verify the patient's immediate safety.\n"
-                "Clinical Dashboard: https://parkinson-tracker-v1.streamlit.app/"
+                "Please verify the patient's immediate safety."
             )
+            if DASHBOARD_PUBLIC_URL:
+                alert_msg += f"\nClinical Dashboard: {DASHBOARD_PUBLIC_URL}"
             try:
                 twilio_client.messages.create(
                     from_=TWILIO_NUMBER,
@@ -531,7 +536,7 @@ def sms_reply():
 
 if __name__ == "__main__":
     try:
-        app.run(port=5000, debug=True, use_reloader=False)
+        app.run(port=FLASK_PORT, debug=FLASK_DEBUG, use_reloader=False)
     except (KeyboardInterrupt, SystemExit):
         if scheduler:
             scheduler.shutdown()

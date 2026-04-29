@@ -48,8 +48,9 @@ This project is a cloud-native Parkinson's symptom tracking assistant:
 - `TWILIO_WEBHOOK_URL` (recommended for strict signature validation)
 - `SUPABASE_DB_URL`
 - `CAREGIVER_PHONE_NUMBER`
+- `DASHBOARD_PUBLIC_URL` (optional but recommended for caregiver alert links)
 - `DASHBOARD_USERNAME` (recommended for dashboard access control)
-- `DASHBOARD_PASSWORD` or `DASHBOARD_PASSWORD_HASH` (recommended for dashboard access control)
+- `DASHBOARD_PASSWORD_HASH` (recommended for dashboard access control; if set, plaintext password is ignored)
 
 Optional runtime controls:
 - `DB_CONNECT_TIMEOUT_SECONDS` (default: `10`)
@@ -63,8 +64,10 @@ Optional runtime controls:
 - `SCHEDULER_REQUIRE_LEADER_LOCK` (default: `true`)
 - `SCHEDULER_LEADER_PORT` (default: `47200`)
 - `DASHBOARD_SESSION_TIMEOUT_MINUTES` (default: `60`)
+- `DASHBOARD_REQUIRE_AUTH` (default: `true`; when true and auth config is missing, dashboard blocks access)
 - `DASHBOARD_LOOKBACK_DAYS` (default: `365`)
 - `DASHBOARD_HISTORY_LIMIT` (default: `5000`)
+- `FLASK_DEBUG` (default: `false`; keep `false` in production)
 
 ## Run Locally
 ```bash

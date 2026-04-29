@@ -19,6 +19,7 @@ SUPABASE_URL = os.getenv("SUPABASE_DB_URL")
 
 DB_CONNECT_TIMEOUT_SECONDS = int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "10"))
 MEDIA_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "20"))
+DIALOGUE_CONTEXT_TURNS = int(os.getenv("DIALOGUE_CONTEXT_TURNS", "3"))
 
 
 def get_db_connection():
@@ -116,7 +117,14 @@ Format: [MOCA] Score: <Score>/3, Context: <Brief evaluation details>
 # ==========================================
 # 4. LLM Interface & Data Logging
 # ==========================================
-def get_ai_response(user_message, conversation_history, patient_id, image_url=None, persist_log=True):
+def get_ai_response(
+    user_message,
+    conversation_history,
+    patient_id,
+    image_url=None,
+    persist_log=True,
+    context_turns=DIALOGUE_CONTEXT_TURNS,
+):
     """
     Generates the AI response, routing text and vision payloads appropriately,
     and logs the interaction to the cloud PostgreSQL database.
@@ -124,8 +132,10 @@ def get_ai_response(user_message, conversation_history, patient_id, image_url=No
     safe_user_message = (user_message or "").strip()
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    # Inject conversational context (last 3 turns to maintain continuity)
-    for turn in conversation_history[-3:]:
+    # Inject conversational context (configurable rolling window)
+    safe_turn_count = max(0, int(context_turns))
+    history_window = conversation_history[-safe_turn_count:] if safe_turn_count else []
+    for turn in history_window:
         messages.append({"role": "user", "content": turn["user"]})
         messages.append({"role": "assistant", "content": turn["ai"]})
 

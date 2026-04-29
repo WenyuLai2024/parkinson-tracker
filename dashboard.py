@@ -25,6 +25,7 @@ DASHBOARD_PASSWORD_HASH = os.getenv("DASHBOARD_PASSWORD_HASH", "").strip().lower
 DASHBOARD_SESSION_TIMEOUT_MINUTES = int(os.getenv("DASHBOARD_SESSION_TIMEOUT_MINUTES", "60"))
 DASHBOARD_LOOKBACK_DAYS = int(os.getenv("DASHBOARD_LOOKBACK_DAYS", "365"))
 DASHBOARD_HISTORY_LIMIT = int(os.getenv("DASHBOARD_HISTORY_LIMIT", "5000"))
+DASHBOARD_REQUIRE_AUTH = os.getenv("DASHBOARD_REQUIRE_AUTH", "true").lower() == "true"
 
 # Define the global UI architecture of the dashboard
 st.set_page_config(page_title="Clinician Dashboard", layout="wide", page_icon="C")
@@ -75,13 +76,24 @@ if st.session_state.dashboard_authenticated and time.time() > st.session_state.d
     st.session_state.dashboard_auth_expiry = 0.0
     st.warning("Session expired. Please sign in again.")
 
-if DASHBOARD_USERNAME and (DASHBOARD_PASSWORD or DASHBOARD_PASSWORD_HASH):
+auth_configured = bool(DASHBOARD_USERNAME and (DASHBOARD_PASSWORD or DASHBOARD_PASSWORD_HASH))
+if DASHBOARD_REQUIRE_AUTH:
+    if not auth_configured:
+        st.error(
+            "Dashboard auth is required but not configured. "
+            "Set DASHBOARD_USERNAME and DASHBOARD_PASSWORD_HASH (recommended) in environment/secrets."
+        )
+        st.stop()
     if not st.session_state.dashboard_authenticated:
         render_login_gate()
 else:
-    st.sidebar.warning(
-        "Auth disabled. Set DASHBOARD_USERNAME and either DASHBOARD_PASSWORD or DASHBOARD_PASSWORD_HASH in .env."
-    )
+    if auth_configured and not st.session_state.dashboard_authenticated:
+        render_login_gate()
+    elif not auth_configured:
+        st.sidebar.warning(
+            "Auth disabled by DASHBOARD_REQUIRE_AUTH=false. "
+            "Configure DASHBOARD_USERNAME + DASHBOARD_PASSWORD_HASH before production use."
+        )
 
 if st.session_state.dashboard_authenticated:
     # Sliding session timeout: each valid interaction extends the session window.
