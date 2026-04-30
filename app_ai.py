@@ -20,10 +20,20 @@ SUPABASE_URL = os.getenv("SUPABASE_DB_URL")
 DB_CONNECT_TIMEOUT_SECONDS = int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "10"))
 MEDIA_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "20"))
 DIALOGUE_CONTEXT_TURNS = int(os.getenv("DIALOGUE_CONTEXT_TURNS", "3"))
+LOG_SENSITIVE_DATA = os.getenv("LOG_SENSITIVE_DATA", "false").lower() == "true"
 
 
 def get_db_connection():
     return psycopg2.connect(SUPABASE_URL, connect_timeout=DB_CONNECT_TIMEOUT_SECONDS)
+
+
+def safe_text_preview_for_log(text, max_len=160):
+    cleaned = " ".join(str(text or "").split())
+    if not cleaned:
+        return "<empty>"
+    if len(cleaned) <= max_len:
+        return cleaned
+    return f"{cleaned[:max_len]}..."
 
 
 # ==========================================
@@ -35,7 +45,7 @@ def get_base64_image(url):
     This enables the vision-language model to process clinical uploads (e.g., MoCA tests).
     """
     try:
-        print(f"Downloading image from Twilio: {url}")
+        print("Downloading image from Twilio media endpoint.")
         response = requests.get(
             url,
             auth=(TWILIO_SID, TWILIO_AUTH),
@@ -191,6 +201,12 @@ def get_ai_response(
             # Keep the interaction functional even when persistence fails.
             print(f"DB Logging Error: {db_error}")
 
-    # Print the raw AI output (including hidden clinical tags) to the terminal for debugging and evaluation
-    print(f"\n[RAW AI OUTPUT FOR DEBUGGING]:\n{ai_response}\n")
+    # Avoid leaking sensitive conversational content by default.
+    if LOG_SENSITIVE_DATA:
+        print(f"\n[RAW AI OUTPUT FOR DEBUGGING]:\n{ai_response}\n")
+    else:
+        print(
+            "[AI OUTPUT METADATA] "
+            f"chars={len(ai_response or '')}, preview='{safe_text_preview_for_log(ai_response)}'"
+        )
     return ai_response

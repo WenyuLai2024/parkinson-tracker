@@ -43,6 +43,7 @@ PROACTIVE_INTERVAL_MINUTES = int(os.getenv("PROACTIVE_INTERVAL_MINUTES", "60"))
 CAREGIVER_CONTEXT_LOG_LIMIT = int(os.getenv("CAREGIVER_CONTEXT_LOG_LIMIT", "10"))
 PROACTIVE_CHECKIN_TIMEZONE = os.getenv("PROACTIVE_CHECKIN_TIMEZONE", "Europe/London")
 DIALOGUE_CONTEXT_TURNS = int(os.getenv("DIALOGUE_CONTEXT_TURNS", "3"))
+LOG_SENSITIVE_DATA = os.getenv("LOG_SENSITIVE_DATA", "false").lower() == "true"
 
 ENABLE_PROACTIVE_CHECKIN = os.getenv("ENABLE_PROACTIVE_CHECKIN", "true").lower() == "true"
 ENABLE_TWILIO_SIGNATURE_VALIDATION = (
@@ -50,6 +51,17 @@ ENABLE_TWILIO_SIGNATURE_VALIDATION = (
 )
 SCHEDULER_REQUIRE_LEADER_LOCK = os.getenv("SCHEDULER_REQUIRE_LEADER_LOCK", "true").lower() == "true"
 SCHEDULER_LEADER_PORT = int(os.getenv("SCHEDULER_LEADER_PORT", "47200"))
+SCHEDULER_EXECUTION_LOCK_ENABLED = os.getenv("SCHEDULER_EXECUTION_LOCK_ENABLED", "true").lower() == "true"
+SCHEDULER_EXECUTION_LOCK_NAME = os.getenv("SCHEDULER_EXECUTION_LOCK_NAME", "proactive_clinical_checkin")
+SCHEDULER_EXECUTION_LOCK_OWNER = os.getenv(
+    "SCHEDULER_EXECUTION_LOCK_OWNER", f"{socket.gethostname()}-{os.getpid()}"
+)
+SCHEDULER_EXECUTION_LOCK_TTL_SECONDS = int(
+    os.getenv(
+        "SCHEDULER_EXECUTION_LOCK_TTL_SECONDS",
+        str(max(120, PROACTIVE_INTERVAL_MINUTES * 60)),
+    )
+)
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 FLASK_PORT = int(os.getenv("PORT", "5000"))
 
@@ -71,6 +83,22 @@ def get_db_connection():
 
 def is_valid_whatsapp_patient_id(identifier):
     return bool(re.fullmatch(r"whatsapp:\+\d{7,15}", identifier or ""))
+
+
+def masked_phone_for_log(number):
+    normalized = normalize_whatsapp_number(number or "")
+    if normalized:
+        return mask_patient_id(normalized)
+    return "***"
+
+
+def safe_text_preview_for_log(text, max_len=120):
+    cleaned = " ".join(str(text or "").split())
+    if not cleaned:
+        return "<empty>"
+    if len(cleaned) <= max_len:
+        return cleaned
+    return f"{cleaned[:max_len]}..."
 
 
 def get_linked_patient_ids_for_caregiver(caregiver_sender):
@@ -201,6 +229,73 @@ def release_scheduler_leader_lock():
         scheduler_lock_socket = None
 
 
+def ensure_scheduler_execution_lock_table(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS scheduler_execution_locks (
+            lock_name TEXT PRIMARY KEY,
+            owner_id TEXT NOT NULL,
+            locked_until TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+
+
+def try_acquire_scheduler_execution_lock():
+    """
+    Cross-instance execution lock (DB lease lock).
+    This prevents duplicate proactive dispatch when multiple app instances run.
+    """
+    if not SCHEDULER_EXECUTION_LOCK_ENABLED:
+        return True
+
+    lease_seconds = max(60, SCHEDULER_EXECUTION_LOCK_TTL_SECONDS)
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                ensure_scheduler_execution_lock_table(cur)
+                cur.execute(
+                    """
+                    INSERT INTO scheduler_execution_locks (lock_name, owner_id, locked_until, updated_at)
+                    VALUES (%s, %s, NOW() + (%s * INTERVAL '1 second'), NOW())
+                    ON CONFLICT (lock_name) DO UPDATE
+                    SET
+                        owner_id = EXCLUDED.owner_id,
+                        locked_until = EXCLUDED.locked_until,
+                        updated_at = NOW()
+                    WHERE
+                        scheduler_execution_locks.locked_until < NOW()
+                        OR scheduler_execution_locks.owner_id = EXCLUDED.owner_id
+                    RETURNING owner_id, locked_until
+                    """,
+                    (
+                        SCHEDULER_EXECUTION_LOCK_NAME,
+                        SCHEDULER_EXECUTION_LOCK_OWNER,
+                        lease_seconds,
+                    ),
+                )
+                row = cur.fetchone()
+            conn.commit()
+
+        if row:
+            print(
+                "Proactive execution lock acquired "
+                f"(name={SCHEDULER_EXECUTION_LOCK_NAME}, owner={SCHEDULER_EXECUTION_LOCK_OWNER})."
+            )
+            return True
+
+        print(
+            "Proactive execution lock is held by another instance. "
+            "Skipping this dispatch cycle."
+        )
+        return False
+    except Exception as e:
+        print(f"Failed to acquire proactive execution lock: {e}")
+        # Fail-safe: skip proactive send to avoid accidental duplicate notifications.
+        return False
+
+
 def get_signature_validation_url():
     """Build URL used for Twilio signature validation."""
     if TWILIO_WEBHOOK_URL:
@@ -267,6 +362,9 @@ def proactive_clinical_checkin():
         f"Executing Proactive EMA Check-in (TZ: {PROACTIVE_CHECKIN_TIMEZONE}, hour={checkin_time.hour})..."
     )
 
+    if not try_acquire_scheduler_execution_lock():
+        return
+
     try:
         active_patient_ids = set()
         with get_db_connection() as conn:
@@ -302,9 +400,15 @@ def proactive_clinical_checkin():
                     body=checkin_message,
                     to=patient_phone,
                 )
-                print(f"Proactive EMA dispatched to {patient_phone} (SID: {msg.sid})")
+                print(
+                    "Proactive EMA dispatched to "
+                    f"{masked_phone_for_log(patient_phone)} (SID: {msg.sid})"
+                )
             except Exception as inner_e:
-                print(f"Failed to dispatch proactive message to {patient_phone}: {inner_e}")
+                print(
+                    "Failed to dispatch proactive message to "
+                    f"{masked_phone_for_log(patient_phone)}: {inner_e}"
+                )
 
     except Exception as e:
         print(f"Database transaction error during proactive check-in: {e}")
@@ -352,7 +456,10 @@ def sms_reply():
     # ROUTE C: Asymmetric Caregiver Gateway (Read-Only Summarization)
     # -----------------------------------------------------------------
     if caregiver_whatsapp and sender_number == caregiver_whatsapp:
-        print(f"[RBAC] Caregiver authorization detected for {sender_number}. Read-only pathway.")
+        print(
+            "[RBAC] Caregiver authorization detected for "
+            f"{masked_phone_for_log(sender_number)}. Read-only pathway."
+        )
         try:
             linked_patient_ids = get_linked_patient_ids_for_caregiver(sender_number)
             if not linked_patient_ids:
@@ -426,7 +533,7 @@ def sms_reply():
         media_url = request.values.get("MediaUrl0", "")
 
         if "audio" in media_content_type:
-            print(f"Audio payload detected. Downloading from: {media_url}")
+            print("Audio payload detected. Downloading media from Twilio.")
             auth = (TWILIO_SID, TWILIO_AUTH)
             try:
                 response = requests.get(media_url, auth=auth, timeout=MEDIA_DOWNLOAD_TIMEOUT_SECONDS)
@@ -446,7 +553,13 @@ def sms_reply():
                             file=audio_file,
                         )
                     msg_received = transcript.text
-                    print(f"Transcription completed: {msg_received}")
+                    if LOG_SENSITIVE_DATA:
+                        print(f"Transcription completed: {msg_received}")
+                    else:
+                        print(
+                            "Transcription completed "
+                            f"(chars={len(msg_received)}, preview='{safe_text_preview_for_log(msg_received)}')."
+                        )
                 except Exception as e:
                     print(f"Whisper processing failed: {e}")
                     msg_received = "System Note: Voice payload processing failed."
@@ -458,13 +571,20 @@ def sms_reply():
 
         elif "image" in media_content_type:
             image_url = media_url
-            print(f"Image attachment detected: {image_url}")
+            print("Image attachment detected.")
 
     if not msg_received and not image_url:
         return str(MessagingResponse())
 
-    print(f"\n--- Inbound Patient Telemetry from {sender_number} ---")
-    print(f"[Payload]: '{msg_received}'")
+    print(f"\n--- Inbound Patient Telemetry from {masked_phone_for_log(sender_number)} ---")
+    if LOG_SENSITIVE_DATA:
+        print(f"[Payload]: '{msg_received}'")
+    else:
+        print(
+            "[Payload metadata] "
+            f"chars={len(msg_received)}, has_image={bool(image_url)}, media_count={num_media}, "
+            f"preview='{safe_text_preview_for_log(msg_received)}'"
+        )
 
     conversation_context = get_recent_conversation_history(sender_number, max_turns=DIALOGUE_CONTEXT_TURNS)
     full_ai_response = get_ai_response(
@@ -476,7 +596,10 @@ def sms_reply():
 
     # --- Clinical Deterioration Alerting Subsystem ---
     if is_high_risk_response(full_ai_response):
-        print(f"[CRITICAL EVENT] High-risk threshold breached for ({sender_number}).")
+        print(
+            "[CRITICAL EVENT] High-risk threshold breached for "
+            f"({masked_phone_for_log(sender_number)})."
+        )
 
         patient_name = "Unknown Patient"
         caregiver_alert_number = caregiver_whatsapp
@@ -507,7 +630,7 @@ def sms_reply():
         if caregiver_alert_number:
             alert_msg = (
                 "[SYSTEM EMERGENCY ALERT]\n"
-                f"Warning: {patient_name} ({sender_number}) has recently reported severe symptoms "
+                f"Warning: {patient_name} ({masked_phone_for_log(sender_number)}) has recently reported severe symptoms "
                 "(e.g., critical stiffness or severe cognitive deviation).\n"
                 "Please verify the patient's immediate safety."
             )
@@ -519,7 +642,7 @@ def sms_reply():
                     body=alert_msg,
                     to=caregiver_alert_number,
                 )
-                print(f"Emergency alert sent to {caregiver_alert_number}")
+                print(f"Emergency alert sent to {masked_phone_for_log(caregiver_alert_number)}")
             except Exception as e:
                 print(f"Emergency alert transmission failed: {e}")
 
@@ -527,7 +650,14 @@ def sms_reply():
     if not display_response:
         display_response = "Thanks, I have logged your update."
 
-    print(f"[System TX] Replying to {sender_number}: {display_response}")
+    if LOG_SENSITIVE_DATA:
+        print(f"[System TX] Replying to {sender_number}: {display_response}")
+    else:
+        print(
+            "[System TX] Replying to "
+            f"{masked_phone_for_log(sender_number)} (chars={len(display_response)}, "
+            f"preview='{safe_text_preview_for_log(display_response)}')"
+        )
 
     resp = MessagingResponse()
     resp.message(display_response)

@@ -60,9 +60,14 @@ Optional runtime controls:
 - `CAREGIVER_CONTEXT_LOG_LIMIT` (default: `10`)
 - `ENABLE_PROACTIVE_CHECKIN` (default: `true`)
 - `ENABLE_TWILIO_SIGNATURE_VALIDATION` (default: `true`)
+- `LOG_SENSITIVE_DATA` (default: `false`; keep `false` in production to avoid logging raw patient content)
 - `DIALOGUE_CONTEXT_TURNS` (default: `3`)
 - `SCHEDULER_REQUIRE_LEADER_LOCK` (default: `true`)
 - `SCHEDULER_LEADER_PORT` (default: `47200`)
+- `SCHEDULER_EXECUTION_LOCK_ENABLED` (default: `true`; DB lease lock to prevent duplicate proactive runs across instances)
+- `SCHEDULER_EXECUTION_LOCK_NAME` (default: `proactive_clinical_checkin`)
+- `SCHEDULER_EXECUTION_LOCK_OWNER` (default: `<hostname>-<pid>`)
+- `SCHEDULER_EXECUTION_LOCK_TTL_SECONDS` (default: `max(120, PROACTIVE_INTERVAL_MINUTES*60)`)
 - `DASHBOARD_SESSION_TIMEOUT_MINUTES` (default: `60`)
 - `DASHBOARD_REQUIRE_AUTH` (default: `true`; when true and auth config is missing, dashboard blocks access)
 - `DASHBOARD_LOOKBACK_DAYS` (default: `365`)
@@ -99,4 +104,7 @@ python -m streamlit run dashboard.py
 
 # 4) Run extraction evaluation
 python test_ai.py
+
+# 5) Run unit tests
+pytest -q
 ```
