@@ -26,13 +26,29 @@ This repository contains an end-to-end engineering system:
 - `docs/`: deployment, architecture, testing, and security documentation
 - `scripts/quick_check.ps1`: local environment and project health checks
 
-## Quick Start (Local)
+## Quick Test (No API Keys)
+Use this path for a fast repository-level validation.
+
 ### 1) Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2) Configure environment
+### 2) Run repository health check
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/quick_check.ps1
+```
+
+### 3) Verify reproducibility artefacts exist
+Check the following files are present:
+- `test_dataset_mds04_native.csv`
+- `mds04_native_test_report_results.csv`
+- `mds04_native_confusion_matrix_evaluation.png`
+
+This confirms the repository includes dataset, evaluation output, and figure artefacts.
+
+## Full Run (API/DB Required)
+### 1) Configure environment
 ```bash
 copy .env.example .env
 ```
@@ -43,12 +59,12 @@ Then fill required values in `.env`:
 - `TWILIO_PHONE_NUMBER`
 - `SUPABASE_DB_URL`
 
-### 3) Run health check
+### 2) Run health check
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/quick_check.ps1
 ```
 
-### 4) Run services
+### 3) Run services
 ```bash
 python app.py
 python -m streamlit run dashboard.py
