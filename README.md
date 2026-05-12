@@ -1,110 +1,75 @@
-# Parkinson Bot (Dissertation Project)
+# Parkinson Tracker (Dissertation Project)
 
-## Overview
-This project is a cloud-native Parkinson's symptom tracking assistant:
-- WhatsApp + Twilio for patient/caregiver interaction
-- OpenAI (`gpt-4o`, Whisper, vision) for symptom extraction and conversational support
-- Supabase PostgreSQL for longitudinal clinical logs
-- Streamlit dashboard for clinician-facing trend analysis and report export
+LLM-based conversational symptom tracking prototype for Parkinson's disease.
 
-## Architecture
-### 1) Ingestion and Conversation Layer
-- `app.py`
-  - Twilio webhook endpoint: `/sms`
-  - Voice transcription (`whisper-1`) and image handling
-  - Proactive check-in scheduler (APScheduler)
-  - Emergency alert forwarding to caregiver
+This repository contains an end-to-end engineering system:
+- WhatsApp intake through Twilio webhooks
+- Multimodal processing (text, voice, image)
+- Structured clinical tag extraction with OpenAI models
+- Supabase PostgreSQL persistence
+- Streamlit dashboard for longitudinal trend review and reporting
 
-### 2) AI Orchestration Layer
-- `app_ai.py`
-  - Maintains system prompt and multi-turn context injection
-  - Calls OpenAI chat model and writes structured outputs to DB
-  - Supports multimodal prompt assembly for image uploads
+## Key Capabilities
+- Conversational intake from patients in a familiar channel (WhatsApp)
+- Structured internal protocol: `[SUMMARY]`, `[HAUSER]`, `[MOCA]`, `[PDQ39]`, `[PROFILE]`
+- Asymmetric dual-track access (patient write path + caregiver read-only summarisation path)
+- High-risk alerting from structured severity thresholds
+- Reproducible offline evaluation pipeline with confusion matrix outputs
 
-### 3) Clinical Tag Parsing Layer
-- `clinical_utils.py`
-  - Centralized parsing for `[SUMMARY]`, `[HAUSER]`, `[MOCA]`
-  - Shared utilities for risk detection and tag sanitization
+## Repository Structure
+- `app.py`: webhook ingestion, routing, proactive scheduler, alert dispatch
+- `app_ai.py`: LLM orchestration, context handling, structured extraction
+- `clinical_utils.py`: shared parsers and risk helpers
+- `dashboard.py`: clinical visualisation and report export
+- `test_ai.py`: automated extraction evaluation
+- `test_dataset_mds04_native.csv`: primary 300-sample evaluation set
+- `docs/`: deployment, architecture, testing, and security documentation
+- `scripts/quick_check.ps1`: local environment and project health checks
 
-### 4) Visualization and Reporting Layer
-- `dashboard.py`
-  - Pulls `chat_history` + `patient_profiles`
-  - Builds Hauser/MoCA/symptom trend charts
-  - Generates AI summary and PDF export
+## Quick Start (Local)
+### 1) Install dependencies
+```bash
+pip install -r requirements.txt
+```
 
-## Data Flow (High-Level)
-1. Patient sends WhatsApp text/voice/image.
-2. `app.py` processes media and calls `get_ai_response(...)`.
-3. `app_ai.py` generates response with structured tags and logs to `chat_history`.
-4. `app.py` strips internal tags before replying to patient.
-5. `dashboard.py` reads DB logs and renders longitudinal trends.
-6. High-risk tagged events trigger caregiver alerts.
-
-## Required Environment Variables
+### 2) Configure environment
+```bash
+copy .env.example .env
+```
+Then fill required values in `.env`:
 - `OPENAI_API_KEY`
 - `TWILIO_ACCOUNT_SID`
 - `TWILIO_AUTH_TOKEN`
 - `TWILIO_PHONE_NUMBER`
-- `TWILIO_WEBHOOK_URL` (recommended for strict signature validation)
 - `SUPABASE_DB_URL`
-- `CAREGIVER_PHONE_NUMBER`
-- `DASHBOARD_PUBLIC_URL` (optional but recommended for caregiver alert links)
-- `DASHBOARD_USERNAME` (recommended for dashboard access control)
-- `DASHBOARD_PASSWORD_HASH` (recommended for dashboard access control; if set, plaintext password is ignored)
 
-Optional runtime controls:
-- `DB_CONNECT_TIMEOUT_SECONDS` (default: `10`)
-- `MEDIA_DOWNLOAD_TIMEOUT_SECONDS` (default: `20`)
-- `PROACTIVE_INTERVAL_MINUTES` (default: `60`)
-- `PROACTIVE_CHECKIN_TIMEZONE` (default: `Europe/London`)
-- `CAREGIVER_CONTEXT_LOG_LIMIT` (default: `10`)
-- `ENABLE_PROACTIVE_CHECKIN` (default: `true`)
-- `ENABLE_TWILIO_SIGNATURE_VALIDATION` (default: `true`)
-- `LOG_SENSITIVE_DATA` (default: `false`; keep `false` in production to avoid logging raw patient content)
-- `DIALOGUE_CONTEXT_TURNS` (default: `3`)
-- `SCHEDULER_REQUIRE_LEADER_LOCK` (default: `true`)
-- `SCHEDULER_LEADER_PORT` (default: `47200`)
-- `SCHEDULER_EXECUTION_LOCK_ENABLED` (default: `true`; DB lease lock to prevent duplicate proactive runs across instances)
-- `SCHEDULER_EXECUTION_LOCK_NAME` (default: `proactive_clinical_checkin`)
-- `SCHEDULER_EXECUTION_LOCK_OWNER` (default: `<hostname>-<pid>`)
-- `SCHEDULER_EXECUTION_LOCK_TTL_SECONDS` (default: `max(120, PROACTIVE_INTERVAL_MINUTES*60)`)
-- `DASHBOARD_SESSION_TIMEOUT_MINUTES` (default: `60`)
-- `DASHBOARD_REQUIRE_AUTH` (default: `true`; when true and auth config is missing, dashboard blocks access)
-- `DASHBOARD_LOOKBACK_DAYS` (default: `365`)
-- `DASHBOARD_HISTORY_LIMIT` (default: `5000`)
-- `FLASK_DEBUG` (default: `false`; keep `false` in production)
+### 3) Run health check
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/quick_check.ps1
+```
 
-## Run Locally
+### 4) Run services
 ```bash
-pip install -r requirements.txt
 python app.py
 python -m streamlit run dashboard.py
 ```
 
-## Notes for Dissertation
-- `test_ai.py` + `test_dataset.csv` provide evaluation workflow for extraction accuracy.
-- `generate_ppmi_baseline.py` creates a synthetic cohort baseline for trend comparison.
-- `simulate_data_cloud.py` can be destructive. Use one of:
-  - `python simulate_data_cloud.py --confirm-reset` (clear and reseed)
-  - `python simulate_data_cloud.py --skip-reset` (append only)
-- Webhook security is enforced through Twilio request signature validation.
-- Proactive scheduler has a single-process leader lock to avoid duplicate dispatch in multi-worker deployments.
-- Conversation context is pulled from cloud DB, so context survives process restarts.
-
-## Quick Validation
+## Reproduce Evaluation Outputs
+Primary dataset run:
 ```bash
-# 1) Basic compile check
-python -m compileall app.py app_ai.py dashboard.py clinical_utils.py test_ai.py
-
-# 2) Run backend
-python app.py
-
-# 3) Run dashboard
-python -m streamlit run dashboard.py
-
-# 4) Run extraction evaluation
-python test_ai.py
-
-# 5) Run unit tests
-pytest -q
+python test_ai.py --dataset test_dataset_mds04_native.csv --output-prefix mds04_native_
 ```
+
+This produces:
+- `mds04_native_test_report_results.csv`
+- `mds04_native_confusion_matrix_evaluation.png`
+
+## Documentation
+- Deployment: `docs/DEPLOYMENT.md`
+- Architecture: `docs/ARCHITECTURE.md`
+- Testing and reproducibility: `docs/TESTING.md`
+- Security and privacy controls: `docs/SECURITY.md`
+
+## Safety Boundary
+This project is an engineering feasibility prototype, not a diagnostic system.
+Outputs support tracking and communication, not clinical decision replacement.

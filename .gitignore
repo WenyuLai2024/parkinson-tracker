@@ -1,3 +1,15 @@
 .env
 __pycache__/
 parkinson_tracking.db
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+*.log
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
